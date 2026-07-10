@@ -1,0 +1,25 @@
+services:
+  guardrails:
+    build: .
+    env_file:
+      - .env
+    environment:
+      NEMO_GUARDRAILS_CONFIG_DIR: /app/configs
+      NEMO_GUARDRAILS_DEFAULT_CONFIG_ID: default
+      MASKING_CONFIG_PATH: /app/masking.yml
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/rails/configs', timeout=2).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

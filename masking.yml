@@ -1,0 +1,130 @@
+enabled: true
+collapse_blank_lines: true
+
+rules:
+  - name: remove-name-placeholder-parentheses
+    type: regex
+    pattern: "\\s*[（(]\\s*\\[NAME\\]\\s*[）)]"
+    replacement: ""
+
+  - name: trim-space-before-heading-close
+    type: regex
+    pattern: "(Candidate\\s+\\d+\\s*:\\s*[^\\n*]+?)\\s+(\\*\\*)"
+    replacement: "\\1\\2"
+
+  - name: role-heading-chinese-name-parentheses
+    type: regex
+    pattern: "((?:Engineer|Analyst|Designer|Marketer|Manager|Sales|Specialist|Coach|Developer|Scientist|Architect|Consultant|Lead|Director|Officer|Recruiter|工程師|分析師|設計師|行銷|經理|銷售|專員|教練)\\s*)[（(][\\u4e00-\\u9fff]{2,4}[）)]"
+    replacement: "\\1"
+
+  - name: likely-chinese-full-name
+    type: regex
+    pattern: "(?<![\\u4e00-\\u9fff])(?:陳|林|張|王|李|黃|劉|吳|趙|蔡|楊|許|鄭|謝|郭|洪|曾|邱|廖|賴|徐|周|葉|蘇|莊|江|何|蕭|羅|高|潘|簡|朱|鍾|游|彭|詹|胡|施|沈|余|盧|梁|顏|柯|孫|魏|戴|范|方|宋|鄧|杜|傅|侯|曹|薛|丁|阮|馬|蔣|唐|卓|藍|馮|姚|石|董|紀|歐|程|連|古|汪|湯|姜|田|康|鄒|白|涂|尤|巫|韓|龔|嚴|袁|鐘|黎|金|童|陸|夏|柳|凃|邵)[\\u4e00-\\u9fff]{1,3}(?![\\u4e00-\\u9fff])"
+    replacement: "[NAME]"
+
+  - name: labeled-name-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:名字|姓名|Name)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-email-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:Email|E-mail|電子郵件|信箱)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-phone-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:電話|手機|Phone|Mobile|Tel)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-age-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:年紀|年齡|Age)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-gender-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:性別|Gender|Sex)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: openai-api-key-variable
+    type: literal
+    pattern: OPENAI_API_KEY
+    replacement: "[SECRET_NAME]"
+    case_sensitive: false
+
+  - name: openai-api-key-value
+    type: regex
+    pattern: "sk-[A-Za-z0-9_-]{20,}"
+    replacement: "[OPENAI_API_KEY]"
+
+  - name: email-address
+    type: regex
+    pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b"
+    replacement: "[EMAIL]"
+
+  - name: north-american-phone-number
+    type: regex
+    pattern: "(?<!\\w)(?:\\+?1[-.\\s]?)?(?:\\(?\\d{3}\\)?[-.\\s]?)\\d{3}[-.\\s]?\\d{4}\\b"
+    replacement: "[PHONE]"
+
+  - name: taiwan-mobile-phone-number
+    type: regex
+    pattern: "\\b09\\d{2}[-.\\s]?\\d{3}[-.\\s]?\\d{3}\\b"
+    replacement: "[PHONE]"
+
+  - name: taiwan-landline-phone-number
+    type: regex
+    pattern: "\\b0\\d{1,2}[-.\\s]?\\d{3,4}[-.\\s]?\\d{4}\\b"
+    replacement: "[PHONE]"
+
+  - name: generic-age
+    type: regex
+    pattern: "\\b(?:[1-9]\\d?|1[01]\\d|120)\\s*(?:歲|years? old|y/o)\\b"
+    replacement: "[AGE]"
+
+  - name: credit-card-number
+    type: regex
+    pattern: "\\b(?:\\d[ -]?){13,19}\\b"
+    replacement: "[CREDIT_CARD]"
+
+  - name: jwt-token
+    type: regex
+    pattern: "\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b"
+    replacement: "[JWT]"
+
+  - name: aws-access-key-id
+    type: regex
+    pattern: "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b"
+    replacement: "[AWS_ACCESS_KEY_ID]"
+
+  - name: aws-secret-access-key-assignment
+    type: regex
+    pattern: "(?i)\\baws_secret_access_key\\s*=\\s*[A-Za-z0-9/+=]{40}\\b"
+    replacement: "aws_secret_access_key=[AWS_SECRET_ACCESS_KEY]"
+
+  - name: github-token-classic
+    type: regex
+    pattern: "\\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\\b"
+    replacement: "[GITHUB_TOKEN]"
+
+  - name: github-token-fine-grained
+    type: regex
+    pattern: "\\bgithub_pat_[A-Za-z0-9_]{22,255}\\b"
+    replacement: "[GITHUB_TOKEN]"
+
+  - name: bearer-token
+    type: regex
+    pattern: "(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]{20,}\\b"
+    replacement: "Bearer [TOKEN]"
+
+  - name: database-url
+    type: regex
+    pattern: "\\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|redis|rediss)://[^\\s\"']+"
+    replacement: "[DATABASE_URL]"
+
+  - name: example-internal-project
+    type: literal
+    pattern: internal-project-x
+    replacement: "[INTERNAL_PROJECT]"
+    case_sensitive: false

@@ -1,0 +1,22 @@
+models:
+  - type: main
+    engine: openai
+    model: gpt-4o-mini
+    parameters:
+      temperature: 0.1
+
+instructions:
+  - type: general
+    content: |
+      You are a customer support assistant for Acme Shop.
+      Only answer questions about orders, returns, refunds, shipping, product availability, and account support.
+      If the user asks about unrelated topics, briefly refuse and redirect them to customer support topics.
+      Never ask for or reveal secrets, passwords, API keys, or payment card numbers.
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output
