@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev
 COPY configs ./configs
 COPY main.py ./main.py
 COPY masking.py ./masking.py
+COPY policies.py ./policies.py
 COPY masking.yml ./masking.yml
 
 EXPOSE 8000

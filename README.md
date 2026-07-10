@@ -24,6 +24,12 @@ uv run --env-file .env python main.py
 
 The service listens on `http://localhost:8000`.
 
+For browser frontends, CORS allows `http://localhost:3000` and `http://127.0.0.1:3000` by default. Override it in `.env`:
+
+```bash
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+```
+
 Check masking rules without calling OpenAI:
 
 ```bash
@@ -158,6 +164,53 @@ You can also add temporary comma-separated keywords in `.env`:
 ```bash
 MASK_KEYWORDS=secret-product-name,customer-token
 MASK_REPLACEMENT=[REDACTED]
+```
+
+## Policy Redaction API
+
+Create named policies for user-managed literal keyword redaction. Policies are stored in SQLite at `data/policies.sqlite3` by default.
+
+Create a policy:
+
+```bash
+curl -X POST http://localhost:8000/v1/policies \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "resume-client-a",
+    "name": "Resume Client A",
+    "enabled": true,
+    "replacement": "[REDACTED]",
+    "case_sensitive": false,
+    "keywords": ["秘密專案", "內部代號A", "client-name"]
+  }'
+```
+
+Preview a policy without calling OpenAI:
+
+```bash
+curl -X POST http://localhost:8000/v1/policies/resume-client-a/preview \
+  -H "Content-Type: application/json" \
+  -d '{"text": "秘密專案 belongs to client-name and admin@example.com"}'
+```
+
+Apply a policy to chat by adding `guardrails.policy_id`. The policy keywords are combined with the built-in `masking.yml` rules:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Summarize this resume mentioning 秘密專案."
+      }
+    ],
+    "guardrails": {
+      "config_id": "resume-screening",
+      "policy_id": "resume-client-a"
+    }
+  }'
 ```
 
 ## Tests

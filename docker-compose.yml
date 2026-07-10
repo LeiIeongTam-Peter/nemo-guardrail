@@ -7,9 +7,12 @@ services:
       NEMO_GUARDRAILS_CONFIG_DIR: /app/configs
       NEMO_GUARDRAILS_DEFAULT_CONFIG_ID: default
       MASKING_CONFIG_PATH: /app/masking.yml
+      POLICY_DB_PATH: /app/data/policies.sqlite3
       PORT: "8000"
     ports:
       - "8000:8000"
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test:

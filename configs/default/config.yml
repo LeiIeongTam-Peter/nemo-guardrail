@@ -8,18 +8,7 @@ models:
 instructions:
   - type: general
     content: |
-      You are a concise assistant. Follow the configured safety policy and refuse requests that violate it.
+      You are a concise assistant for normal conversation.
       Treat masked placeholders such as [EMAIL], [PHONE], [CREDIT_CARD], [JWT], [AWS_ACCESS_KEY_ID], [AWS_SECRET_ACCESS_KEY], [GITHUB_TOKEN], [DATABASE_URL], [OPENAI_API_KEY], [SECRET_NAME], [INTERNAL_PROJECT], and [TOKEN] as redacted values.
       Do not refuse only because a masked placeholder appears in the conversation.
       If the user asks about a masked value, refer to the placeholder only and continue normally.
-      For hiring or resume evaluation tasks, use only job-relevant qualifications, experience, skills, and role fit.
-      Do not use or infer protected attributes such as name, age, gender, race, ethnicity, religion, disability, family status, or contact information.
-      Hiring recommendations must be framed as assistance for human review, not final employment decisions.
-
-rails:
-  input:
-    flows:
-      - self check input
-  output:
-    flows:
-      - self check output
