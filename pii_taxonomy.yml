@@ -1,0 +1,155 @@
+version: 1
+description: >
+  Bilingual PII taxonomy for deterministic masking rules, NeMo GLiNER labels,
+  and OpenAI Guardrails/Presidio entity mappings. Deterministic rules are the
+  source of truth for fixed formats; model providers are a second-pass fallback
+  for natural-language entities.
+
+providers:
+  deterministic:
+    role: fixed-format and label-based masking
+    languages: ["en", "zh-Hant", "zh-Hans"]
+    notes:
+      - Best for email, phone, ID numbers, secrets, and resume/contact fields.
+      - Implemented in masking.yml.
+  nemo:
+    role: model-based PII span detection
+    languages: ["en", "zh-Hant", "zh-Hans"]
+    notes:
+      - Uses GLiNER labels. Chinese quality must be validated with local evals.
+      - Good candidate for names, addresses, organizations, and natural text.
+  openai-guardrails:
+    role: Presidio-based local PII masking
+    languages: ["en"]
+    notes:
+      - Keep as the English Presidio provider.
+      - Do not rely on it for Chinese names or Chinese addresses.
+
+entities:
+  - id: person_name
+    placeholder: "[NAME]"
+    en_keywords: ["name", "full name", "candidate", "applicant"]
+    zh_keywords: ["姓名", "名字", "中文姓名", "英文姓名", "候選人", "申請人"]
+    deterministic_rule_names:
+      - likely-chinese-full-name
+      - introduced-chinese-name
+      - labeled-name-field
+      - role-heading-chinese-name-parentheses
+    nemo_labels: ["person", "first_name", "last_name", "full_name", "chinese_name"]
+    openai_guardrails_entities: ["PERSON"]
+
+  - id: email
+    placeholder: "[EMAIL]"
+    en_keywords: ["email", "e-mail", "mail"]
+    zh_keywords: ["電子郵件", "信箱", "聯絡信箱", "電子信箱"]
+    deterministic_rule_names:
+      - email-address
+      - labeled-email-field
+    nemo_labels: ["email", "email_address"]
+    openai_guardrails_entities: ["EMAIL_ADDRESS"]
+
+  - id: phone
+    placeholder: "[PHONE]"
+    en_keywords: ["phone", "mobile", "tel", "telephone"]
+    zh_keywords: ["電話", "手機", "聯絡電話", "行動電話", "市話"]
+    deterministic_rule_names:
+      - north-american-phone-number
+      - taiwan-mobile-phone-number
+      - taiwan-landline-phone-number
+      - labeled-phone-field
+    nemo_labels: ["phone_number", "mobile_phone", "telephone"]
+    openai_guardrails_entities: ["PHONE_NUMBER"]
+
+  - id: national_id
+    placeholder: "[NATIONAL_ID]"
+    en_keywords: ["national id", "id number", "resident certificate"]
+    zh_keywords: ["身分證", "身份證", "身分證字號", "身份證字號", "統一證號", "居留證"]
+    deterministic_rule_names:
+      - taiwan-national-id
+      - taiwan-resident-certificate-number
+      - china-national-id
+      - labeled-national-id-field
+    nemo_labels: ["national_id", "identity_document", "tax_id", "taiwan_id", "china_id"]
+    openai_guardrails_entities: ["NRP"]
+
+  - id: birthdate
+    placeholder: "[DATE]"
+    en_keywords: ["birthday", "birthdate", "date of birth", "dob"]
+    zh_keywords: ["生日", "出生日期", "出生年月日", "出生年月"]
+    deterministic_rule_names:
+      - labeled-birthdate-field
+    nemo_labels: ["date_of_birth", "birthdate", "date"]
+    openai_guardrails_entities: ["DATE_TIME"]
+
+  - id: age
+    placeholder: "[AGE]"
+    en_keywords: ["age", "years old"]
+    zh_keywords: ["年齡", "年紀", "歲"]
+    deterministic_rule_names:
+      - generic-age
+      - labeled-age-field
+    nemo_labels: ["age"]
+    openai_guardrails_entities: []
+
+  - id: gender
+    placeholder: "[GENDER]"
+    en_keywords: ["gender", "sex"]
+    zh_keywords: ["性別"]
+    deterministic_rule_names:
+      - labeled-gender-field
+    nemo_labels: ["gender", "sex"]
+    openai_guardrails_entities: []
+
+  - id: address
+    placeholder: "[ADDRESS]"
+    en_keywords: ["address", "mailing address", "residence"]
+    zh_keywords: ["地址", "住址", "通訊地址", "戶籍地址", "居住地"]
+    deterministic_rule_names:
+      - labeled-address-field
+      - inline-address-phrase
+    nemo_labels: ["street_address", "address", "location", "city", "state", "postcode", "country"]
+    openai_guardrails_entities: ["LOCATION"]
+
+  - id: passport
+    placeholder: "[PASSPORT]"
+    en_keywords: ["passport", "passport number"]
+    zh_keywords: ["護照", "護照號碼"]
+    deterministic_rule_names:
+      - labeled-passport-field
+    nemo_labels: ["passport_number", "identity_document"]
+    openai_guardrails_entities: ["US_PASSPORT", "IN_PASSPORT", "IT_PASSPORT"]
+
+  - id: messaging_id
+    placeholder: "[MESSAGING_ID]"
+    en_keywords: ["line id", "wechat", "telegram", "skype"]
+    zh_keywords: ["LINE ID", "微信", "通訊軟體", "即時通訊"]
+    deterministic_rule_names:
+      - labeled-messaging-id-field
+    nemo_labels: ["username", "messaging_id", "account_id"]
+    openai_guardrails_entities: []
+
+  - id: credit_card
+    placeholder: "[CREDIT_CARD]"
+    en_keywords: ["credit card", "card number", "cc"]
+    zh_keywords: ["信用卡", "卡號"]
+    deterministic_rule_names:
+      - credit-card-number
+    nemo_labels: ["credit_card_number"]
+    openai_guardrails_entities: ["CREDIT_CARD"]
+
+  - id: secret
+    placeholder: "[TOKEN]"
+    en_keywords: ["api key", "token", "secret", "password", "bearer"]
+    zh_keywords: ["金鑰", "密鑰", "權杖", "密碼", "憑證"]
+    deterministic_rule_names:
+      - openai-api-key-variable
+      - openai-api-key-value
+      - jwt-token
+      - aws-access-key-id
+      - aws-secret-access-key-assignment
+      - github-token-classic
+      - github-token-fine-grained
+      - bearer-token
+      - database-url
+    nemo_labels: ["api_key", "password", "username", "account_number"]
+    openai_guardrails_entities: ["CRYPTO", "US_BANK_NUMBER", "IBAN_CODE"]

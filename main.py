@@ -15,12 +15,13 @@ from masking import (  # noqa: E402
 from nemoguardrails.server import api  # noqa: E402
 from nemoguardrails.telemetry import DeploymentTypeEnum, set_deployment_type  # noqa: E402
 from pii import (  # noqa: E402
-    DEFAULT_LANGUAGE,
     DEFAULT_SCORE_THRESHOLD,
     PiiConfigurationError,
     PiiDetector,
     PiiProviderError,
+    default_language_for_provider,
 )
+from pii_taxonomy import load_pii_taxonomy  # noqa: E402
 
 
 BASE_DIR = Path(__file__).parent
@@ -34,6 +35,7 @@ def create_app():
     config_dir = os.getenv("NEMO_GUARDRAILS_CONFIG_DIR", str(BASE_DIR / "configs"))
     default_config_id = os.getenv("NEMO_GUARDRAILS_DEFAULT_CONFIG_ID", "default")
     masking_config_path = os.getenv("MASKING_CONFIG_PATH", str(BASE_DIR / "masking.yml"))
+    pii_taxonomy_path = os.getenv("PII_TAXONOMY_PATH", str(BASE_DIR / "pii_taxonomy.yml"))
     cors_allowed_origins = _split_csv(
         os.getenv(
             "CORS_ALLOWED_ORIGINS",
@@ -55,8 +57,10 @@ def create_app():
 
     masker = Masker.from_path(masking_config_path)
     pii_detector = PiiDetector()
+    pii_taxonomy = load_pii_taxonomy(pii_taxonomy_path)
     api.app.state.masker = masker
     api.app.state.pii_detector = pii_detector
+    api.app.state.pii_taxonomy = pii_taxonomy
     api.app.state.mask_path_prefixes = mask_path_prefixes
     api.app.add_middleware(
         MaskingMiddleware,
@@ -79,6 +83,10 @@ def create_app():
             "rules": masker.rule_names,
             "path_prefixes": mask_path_prefixes,
         }
+
+    @api.app.get("/v1/pii/taxonomy")
+    async def pii_taxonomy_endpoint():
+        return pii_taxonomy
 
     @api.app.post("/v1/masking/preview")
     async def masking_preview(payload: dict[str, Any] = Body(...)):
@@ -191,9 +199,14 @@ def _parse_pii_preview_payload(
     if provider is not None and not isinstance(provider, str):
         raise HTTPException(status_code=400, detail="provider must be a string.")
 
-    language = payload.get("language", DEFAULT_LANGUAGE)
+    language = payload.get("language")
     if not isinstance(language, str):
-        raise HTTPException(status_code=400, detail="language must be a string.")
+        if language is not None:
+            raise HTTPException(status_code=400, detail="language must be a string.")
+        try:
+            language = default_language_for_provider(provider)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     score_threshold = payload.get("score_threshold", DEFAULT_SCORE_THRESHOLD)
     if not isinstance(score_threshold, int | float):

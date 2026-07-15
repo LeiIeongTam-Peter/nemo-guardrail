@@ -7,10 +7,10 @@ from typing import Any, Pattern
 
 import yaml
 from pii import (
-    DEFAULT_LANGUAGE,
     DEFAULT_SCORE_THRESHOLD,
     PiiConfigurationError,
     PiiProviderError,
+    default_language_for_provider,
 )
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -292,7 +292,7 @@ class MaskingMiddleware:
 
         enable_pii = guardrails.pop("enable_pii", False)
         provider = guardrails.pop("pii_provider", None)
-        language = guardrails.pop("pii_language", DEFAULT_LANGUAGE)
+        language = guardrails.pop("pii_language", None)
         score_threshold = guardrails.pop("pii_score_threshold", DEFAULT_SCORE_THRESHOLD)
         entities = guardrails.pop("pii_entities", None)
         detect_encoded_pii = guardrails.pop("pii_detect_encoded", False)
@@ -308,8 +308,13 @@ class MaskingMiddleware:
             return _json_error(503, "PII detector is not configured.")
         if provider is not None and not isinstance(provider, str):
             return _json_error(400, "guardrails.pii_provider must be a string.")
-        if not isinstance(language, str):
+        if language is not None and not isinstance(language, str):
             return _json_error(400, "guardrails.pii_language must be a string.")
+        if language is None:
+            try:
+                language = default_language_for_provider(provider)
+            except ValueError as exc:
+                return _json_error(400, str(exc))
         if not isinstance(score_threshold, int | float):
             return _json_error(400, "guardrails.pii_score_threshold must be a number.")
         if entities is not None and not (

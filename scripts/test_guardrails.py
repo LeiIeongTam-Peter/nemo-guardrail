@@ -15,7 +15,9 @@ sys.path.insert(0, str(ROOT))
 
 from masking import Masker, PiiMaskOptions, mask_pii_value  # noqa: E402
 from nemoguardrails import RailsConfig  # noqa: E402
-from pii import OPENAI_GUARDRAILS_PROVIDER, PiiDetector  # noqa: E402
+from pii import OPENAI_GUARDRAILS_PROVIDER, PiiConfigurationError, PiiDetector  # noqa: E402
+from pii import default_language_for_provider  # noqa: E402
+from pii_taxonomy import load_pii_taxonomy  # noqa: E402
 
 
 MASKING_CASES = [
@@ -44,6 +46,12 @@ MASKING_CASES = [
         "forbidden": "陳子豪",
     },
     {
+        "name": "introduced-chinese-name",
+        "input": "你好,我叫譚利楊,我的電話是0912-345-678",
+        "expected": "我叫[NAME]",
+        "forbidden": "譚利楊",
+    },
+    {
         "name": "email",
         "input": "Contact admin@example.com",
         "expected": "[EMAIL]",
@@ -56,9 +64,21 @@ MASKING_CASES = [
         "forbidden": "+1 (416) 555-0199",
     },
     {
+        "name": "inline-north-american-phone-after-chinese-label",
+        "input": "我的電話是416-555-0199",
+        "expected": "我的電話是[PHONE]",
+        "forbidden": "416-555-0199",
+    },
+    {
         "name": "taiwan-mobile-phone",
         "input": "電話：0912-345-678\nSummary: ok",
         "expected": "Summary: ok",
+        "forbidden": "0912-345-678",
+    },
+    {
+        "name": "inline-taiwan-mobile-phone",
+        "input": "我的電話是0912-345-678",
+        "expected": "我的電話是[PHONE]",
         "forbidden": "0912-345-678",
     },
     {
@@ -96,6 +116,75 @@ MASKING_CASES = [
         "input": "Gender: female\nSummary: ok",
         "expected": "Summary: ok",
         "forbidden": "Gender:",
+    },
+    {
+        "name": "taiwan-national-id-field",
+        "input": "身分證字號：A123456789\nSummary: ok",
+        "expected": "Summary: ok",
+        "forbidden": "A123456789",
+    },
+    {
+        "name": "taiwan-national-id-standalone",
+        "input": "Candidate ID A123456789 should not leak.",
+        "expected": "[TW_ID]",
+        "forbidden": "A123456789",
+    },
+    {
+        "name": "taiwan-resident-certificate-number",
+        "input": "ARC AB12345678 should not leak.",
+        "expected": "[TW_ARC]",
+        "forbidden": "AB12345678",
+    },
+    {
+        "name": "china-national-id",
+        "input": "身份證 11010519491231002X should not leak.",
+        "expected": "[CN_ID]",
+        "forbidden": "11010519491231002X",
+    },
+    {
+        "name": "chinese-birthdate-field",
+        "input": "出生日期：1992-03-04\nSummary: ok",
+        "expected": "Summary: ok",
+        "forbidden": "1992-03-04",
+    },
+    {
+        "name": "chinese-address-field",
+        "input": "地址：台北市信義區松仁路100號\nSummary: ok",
+        "expected": "Summary: ok",
+        "forbidden": "台北市信義區",
+    },
+    {
+        "name": "inline-address-phrase",
+        "input": "地址是中山區龍江路299號6樓",
+        "expected": "地址是[ADDRESS]",
+        "forbidden": "中山區龍江路299號6樓",
+    },
+    {
+        "name": "mixed-english-chinese-pii",
+        "input": (
+            "My name is Peter, my email is peter@example.com, phone is 416-555-0199.\n"
+            "我叫譚利楊，地址是堅院後院街時喜大廈3樓，我的電話是416-555-0199，"
+            "電郵：lei23lei91@gmail.com"
+        ),
+        "expected": "我叫[NAME]，地址是[ADDRESS]，我的電話是[PHONE]，電郵：[EMAIL]",
+        "forbidden": [
+            "譚利楊",
+            "堅院後院街時喜大廈3樓",
+            "416-555-0199",
+            "lei23lei91@gmail.com",
+        ],
+    },
+    {
+        "name": "chinese-passport-field",
+        "input": "護照號碼：300000000\nSummary: ok",
+        "expected": "Summary: ok",
+        "forbidden": "300000000",
+    },
+    {
+        "name": "line-id-field",
+        "input": "LINE ID：zihao_0912\nSummary: ok",
+        "expected": "Summary: ok",
+        "forbidden": "zihao_0912",
     },
     {
         "name": "credit-card",
@@ -209,6 +298,8 @@ def main() -> int:
     failures: list[str] = []
 
     _run_masking_tests(failures)
+    _run_taxonomy_tests(failures)
+    _run_pii_language_tests(failures)
     _run_pii_value_mask_tests(failures)
     if args.nemo_pii:
         _run_pii_preview_tests(failures)
@@ -221,6 +312,7 @@ def main() -> int:
     _run_config_tests(failures)
 
     if args.server_url:
+        _run_http_taxonomy_tests(args.server_url.rstrip("/"), failures)
         _run_http_preview_tests(args.server_url.rstrip("/"), failures)
         _run_http_redaction_tests(
             args.server_url.rstrip("/"),
@@ -259,8 +351,88 @@ def _run_masking_tests(failures: list[str]) -> None:
     for case in MASKING_CASES:
         masked = masker.mask_text(case["input"])
         _assert_contains(masked, case["expected"], f"masking:{case['name']}", failures)
-        _assert_not_contains(masked, case["forbidden"], f"masking:{case['name']}", failures)
+        forbidden_values = case["forbidden"]
+        if isinstance(forbidden_values, str):
+            forbidden_values = [forbidden_values]
+        for forbidden in forbidden_values:
+            _assert_not_contains(masked, forbidden, f"masking:{case['name']}", failures)
         print(f"masking:{case['name']}: {masked}")
+
+
+def _run_taxonomy_tests(failures: list[str]) -> None:
+    taxonomy = load_pii_taxonomy(ROOT / "pii_taxonomy.yml")
+    entities = taxonomy.get("entities", [])
+    entity_ids = {str(item.get("id")) for item in entities if isinstance(item, dict)}
+
+    for expected in ["person_name", "email", "phone", "national_id", "address", "secret"]:
+        if expected not in entity_ids:
+            failures.append(f"taxonomy: missing entity {expected}")
+
+    for entity in entities:
+        if not isinstance(entity, dict):
+            failures.append("taxonomy: entity must be a mapping")
+            continue
+        for key in ["id", "placeholder", "zh_keywords", "en_keywords"]:
+            if key not in entity:
+                failures.append(f"taxonomy:{entity.get('id', '<unknown>')}: missing {key}")
+
+    print(f"taxonomy: {len(entities)} entities")
+
+
+def _run_pii_language_tests(failures: list[str]) -> None:
+    if default_language_for_provider("nemo") != "auto":
+        failures.append("pii-language:nemo-default: expected auto")
+    if default_language_for_provider(OPENAI_GUARDRAILS_PROVIDER) != "en":
+        failures.append("pii-language:openai-default: expected en")
+
+    detector = PiiDetector(
+        server_endpoint="https://integrate.api.nvidia.com/v1/chat/completions",
+        api_key=None,
+    )
+
+    try:
+        asyncio.run(detector.preview("姓名：王小明", provider="nemo"))
+    except PiiConfigurationError:
+        pass
+    except ValueError as exc:
+        failures.append(f"pii-language:nemo-default-preview: expected auto default, got {exc}")
+    else:
+        failures.append("pii-language:nemo-default-preview: expected missing NVIDIA key configuration error")
+
+    try:
+        asyncio.run(detector.preview("姓名：王小明", provider="nemo", language="zh-Hant"))
+    except PiiConfigurationError:
+        pass
+    except ValueError as exc:
+        failures.append(f"pii-language:nemo-zh: expected zh-Hant to pass language validation, got {exc}")
+    else:
+        failures.append("pii-language:nemo-zh: expected missing NVIDIA key configuration error")
+
+    try:
+        asyncio.run(detector.preview("姓名：王小明", provider="nemo", language="ja"))
+    except ValueError:
+        pass
+    except Exception as exc:
+        failures.append(f"pii-language:nemo-ja: expected language validation error, got {exc}")
+    else:
+        failures.append("pii-language:nemo-ja: expected language validation error")
+
+    try:
+        asyncio.run(
+            PiiDetector().preview(
+                "姓名：王小明",
+                provider=OPENAI_GUARDRAILS_PROVIDER,
+                language="zh-Hant",
+            )
+        )
+    except ValueError:
+        pass
+    except Exception as exc:
+        failures.append(f"pii-language:openai-zh: expected language validation error, got {exc}")
+    else:
+        failures.append("pii-language:openai-zh: expected language validation error")
+
+    print("pii-language: validated")
 
 
 def _run_pii_value_mask_tests(failures: list[str]) -> None:
@@ -369,6 +541,20 @@ def _run_http_preview_tests(server_url: str, failures: list[str]) -> None:
         _assert_not_contains(text, forbidden, "http-preview", failures)
 
     print(f"http-preview: {text}")
+
+
+def _run_http_taxonomy_tests(server_url: str, failures: list[str]) -> None:
+    try:
+        response = _request_json(f"{server_url}/v1/pii/taxonomy", method="GET")
+    except Exception as exc:
+        failures.append(f"http-taxonomy: request failed: {exc}")
+        return
+
+    text = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    for expected in ["person_name", "national_id", "zh_keywords", "nemo_labels"]:
+        _assert_contains(text, expected, "http-taxonomy", failures)
+
+    print(f"http-taxonomy: {len(response.get('entities', []))} entities")
 
 
 def _run_http_pii_tests(server_url: str, failures: list[str]) -> None:

@@ -19,8 +19,13 @@ rules:
 
   - name: likely-chinese-full-name
     type: regex
-    pattern: "(?<![\\u4e00-\\u9fff])(?:陳|林|張|王|李|黃|劉|吳|趙|蔡|楊|許|鄭|謝|郭|洪|曾|邱|廖|賴|徐|周|葉|蘇|莊|江|何|蕭|羅|高|潘|簡|朱|鍾|游|彭|詹|胡|施|沈|余|盧|梁|顏|柯|孫|魏|戴|范|方|宋|鄧|杜|傅|侯|曹|薛|丁|阮|馬|蔣|唐|卓|藍|馮|姚|石|董|紀|歐|程|連|古|汪|湯|姜|田|康|鄒|白|涂|尤|巫|韓|龔|嚴|袁|鐘|黎|金|童|陸|夏|柳|凃|邵)[\\u4e00-\\u9fff]{1,3}(?![\\u4e00-\\u9fff])"
+    pattern: "(?<![\\u4e00-\\u9fff])(?:陳|林|張|王|李|黃|劉|吳|趙|蔡|楊|許|鄭|謝|郭|洪|曾|邱|廖|賴|徐|周|葉|蘇|莊|江|何|蕭|羅|高|潘|簡|朱|鍾|游|彭|詹|胡|施|沈|余|盧|梁|顏|柯|孫|魏|戴|范|方|宋|鄧|譚|谭|杜|傅|侯|曹|薛|丁|阮|馬|蔣|唐|卓|藍|馮|姚|石|董|紀|歐|程|連|古|汪|湯|姜|田|康|鄒|白|涂|尤|巫|韓|龔|嚴|袁|鐘|黎|金|童|陸|夏|柳|凃|邵)[\\u4e00-\\u9fff]{1,3}(?![\\u4e00-\\u9fff])"
     replacement: "[NAME]"
+
+  - name: introduced-chinese-name
+    type: regex
+    pattern: "((?:我叫|我是|本人(?:叫|是)?|名字(?:是|叫)|姓名(?:是|為|叫))\\s*)[\\u4e00-\\u9fff]{2,4}(?![\\u4e00-\\u9fff])"
+    replacement: "\\1[NAME]"
 
   - name: labeled-name-field
     type: regex
@@ -47,6 +52,36 @@ rules:
     pattern: "(?im)^([^\\S\\r\\n]*(?:性別|Gender|Sex)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
     replacement: ""
 
+  - name: labeled-national-id-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:身分證(?:字號)?|身份證(?:字號)?|統一證號|居留證(?:號碼|字號)?|National ID|ID Number|Resident Certificate)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-birthdate-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:生日|出生日期|出生年月日|出生年月|Birthday|Birthdate|Date of Birth|DOB)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-address-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:地址|住址|通訊地址|戶籍地址|居住地|Address|Mailing Address|Residence)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: inline-address-phrase
+    type: regex
+    pattern: "((?:地址|住址|通訊地址|戶籍地址|居住地|Address|Mailing Address|Residence)\\s*(?:是|為|在|:|：)\\s*)[^\\s,，。；;\\n\\r]+"
+    replacement: "\\1[ADDRESS]"
+
+  - name: labeled-passport-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:護照(?:號碼)?|Passport(?: Number)?)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
+  - name: labeled-messaging-id-field
+    type: regex
+    pattern: "(?im)^([^\\S\\r\\n]*(?:LINE(?:\\s*ID)?|Line(?:\\s*ID)?|WeChat|微信|Telegram|Skype)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"
+    replacement: ""
+
   - name: openai-api-key-variable
     type: literal
     pattern: OPENAI_API_KEY
@@ -65,18 +100,33 @@ rules:
 
   - name: north-american-phone-number
     type: regex
-    pattern: "(?<!\\w)(?:\\+?1[-.\\s]?)?(?:\\(?\\d{3}\\)?[-.\\s]?)\\d{3}[-.\\s]?\\d{4}\\b"
+    pattern: "(?<![A-Za-z0-9_])(?:\\+?1[-.\\s]?)?(?:\\(?\\d{3}\\)?[-.\\s]?)\\d{3}[-.\\s]?\\d{4}(?![A-Za-z0-9_])"
     replacement: "[PHONE]"
 
   - name: taiwan-mobile-phone-number
     type: regex
-    pattern: "\\b09\\d{2}[-.\\s]?\\d{3}[-.\\s]?\\d{3}\\b"
+    pattern: "(?<!\\d)09\\d{2}[-.\\s]?\\d{3}[-.\\s]?\\d{3}(?!\\d)"
     replacement: "[PHONE]"
 
   - name: taiwan-landline-phone-number
     type: regex
-    pattern: "\\b0\\d{1,2}[-.\\s]?\\d{3,4}[-.\\s]?\\d{4}\\b"
+    pattern: "(?<!\\d)0\\d{1,2}[-.\\s]?\\d{3,4}[-.\\s]?\\d{4}(?!\\d)"
     replacement: "[PHONE]"
+
+  - name: taiwan-national-id
+    type: regex
+    pattern: "(?<![A-Za-z0-9])[A-Z][12]\\d{8}(?![A-Za-z0-9])"
+    replacement: "[TW_ID]"
+
+  - name: taiwan-resident-certificate-number
+    type: regex
+    pattern: "(?<![A-Za-z0-9])(?:[A-Z][A-D]\\d{8}|[A-Z][89]\\d{8})(?![A-Za-z0-9])"
+    replacement: "[TW_ARC]"
+
+  - name: china-national-id
+    type: regex
+    pattern: "(?<![A-Za-z0-9])\\d{6}(?:18|19|20)\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx](?![A-Za-z0-9])"
+    replacement: "[CN_ID]"
 
   - name: generic-age
     type: regex

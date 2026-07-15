@@ -128,6 +128,7 @@ Guardrails configs are in `configs/`.
 - `config.yml` defines the OpenAI model and enables input/output rails.
 - `prompts.yml` defines the policy used by the self-check rails.
 - `masking.yml` defines deterministic literal and regex masking rules.
+- `pii_taxonomy.yml` maps bilingual PII types to Chinese/English keywords, deterministic rules, NeMo labels, and OpenAI Guardrails entities.
 
 Additional examples are in `docs/guardrail-examples.md`.
 
@@ -146,6 +147,11 @@ Built-in rules currently cover:
 - resume-style `電話` / `手機` / `Phone` / `Mobile` / `Tel` fields are removed
 - resume-style `年紀` / `年齡` / `Age` fields are removed
 - resume-style `性別` / `Gender` / `Sex` fields are removed
+- resume-style `身分證` / `身份證` / `居留證` / `National ID` fields are removed
+- resume-style `生日` / `出生日期` / `DOB` fields are removed
+- resume-style `地址` / `住址` / `通訊地址` / `Address` fields are removed
+- resume-style `護照` / `Passport` and `LINE ID` / `微信` / messaging ID fields are removed
+- standalone Taiwan national IDs, Taiwan resident certificate numbers, and China national IDs
 - common secrets such as OpenAI keys, AWS keys, GitHub tokens, JWTs, bearer tokens, credit cards, and database URLs
 
 Edit `masking.yml` to add deployment-wide rules:
@@ -205,6 +211,16 @@ OpenAI Guardrails chat example:
 ```
 
 Use `PII_PROVIDER=openai-guardrails` in `.env` to make OpenAI Guardrails the default PII provider when a request does not specify one.
+
+PII language defaults are provider-specific. NeMo defaults to `auto`, which means the backend sends the raw UTF-8 text to GLiNER with no English-only restriction so mixed Chinese/English input can be evaluated together. OpenAI Guardrails defaults to and only supports `en` in this service.
+
+The bilingual PII taxonomy is available for frontend presets and admin review:
+
+```bash
+curl http://localhost:8000/v1/pii/taxonomy
+```
+
+Use the taxonomy as a mapping layer only. `masking.yml` remains the executable deterministic rule set, NeMo accepts entity labels, and OpenAI Guardrails only accepts its fixed Presidio entity names.
 
 ## Experimental PII Preview
 

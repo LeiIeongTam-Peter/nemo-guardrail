@@ -91,6 +91,7 @@ Supported provider values:
 
 ```ts
 type PiiProvider = "nemo" | "openai-guardrails";
+type PiiLanguage = "en" | "zh" | "zh-Hant" | "zh-Hans" | "auto";
 ```
 
 Provider behavior:
@@ -107,6 +108,8 @@ Suggested provider labels:
 
 Entity names are provider-specific. NeMo accepts labels such as `first_name`, `email`, and `phone_number`. OpenAI Guardrails accepts labels such as `PERSON`, `EMAIL_ADDRESS`, and `PHONE_NUMBER`; the backend also maps common aliases like `email`, `phone_number`, `first_name`, and `last_name`.
 
+The backend also ships a bilingual PII taxonomy in `pii_taxonomy.yml`. Use it to show Chinese/English keywords and provider mappings without hard-coding them in the frontend. It is descriptive metadata; `masking.yml` is still the executable deterministic rule set.
+
 Suggested entity presets:
 
 ```ts
@@ -121,7 +124,7 @@ Preview endpoints use top-level PII fields:
 ```ts
 type PreviewPiiFields = {
   provider?: PiiProvider;
-  language?: "en";
+  language?: PiiLanguage;
   score_threshold?: number;
   entities?: string[];
   detect_encoded_pii?: boolean;
@@ -135,7 +138,7 @@ type ChatGuardrailsFields = {
   config_id?: string;
   enable_pii?: boolean;
   pii_provider?: PiiProvider;
-  pii_language?: "en";
+  pii_language?: PiiLanguage;
   pii_score_threshold?: number;
   pii_entities?: string[];
   pii_detect_encoded?: boolean;
@@ -143,6 +146,8 @@ type ChatGuardrailsFields = {
 ```
 
 Backend-only PII fields are removed before the chat request is forwarded to NeMo/OpenAI.
+
+Language behavior is provider-specific. NeMo defaults to `auto`, which sends raw UTF-8 text to GLiNER without forcing English-only validation, so mixed Chinese/English input can be evaluated together. NeMo also accepts `en`, `zh`, `zh-Hant`, and `zh-Hans` as response metadata. OpenAI Guardrails is Presidio/spaCy in this backend and defaults to, and only accepts, `en`.
 
 ## Endpoints
 
@@ -161,6 +166,35 @@ type MaskingRulesResponse = {
   path_prefixes: string[];
 };
 ```
+
+### List Bilingual PII Taxonomy
+
+```http
+GET /v1/pii/taxonomy
+```
+
+Response:
+
+```ts
+type PiiTaxonomyEntity = {
+  id: string;
+  placeholder: string;
+  en_keywords: string[];
+  zh_keywords: string[];
+  deterministic_rule_names: string[];
+  nemo_labels: string[];
+  openai_guardrails_entities: string[];
+};
+
+type PiiTaxonomyResponse = {
+  version: number;
+  description: string;
+  providers: Record<string, unknown>;
+  entities: PiiTaxonomyEntity[];
+};
+```
+
+Use this endpoint for UI presets such as "Chinese/Taiwan resume PII", provider-specific entity suggestions, and explanatory copy. Do not treat taxonomy keywords as a user-editable production policy engine.
 
 ### Preview Deterministic Masking
 
@@ -197,7 +231,7 @@ Content-Type: application/json
 type PiiPreviewRequest = {
   text: string;
   provider?: "nemo" | "openai-guardrails";
-  language?: "en";
+  language?: PiiLanguage;
   score_threshold?: number;
   entities?: string[];
   detect_encoded_pii?: boolean;
@@ -209,8 +243,9 @@ NeMo request:
 ```json
 {
   "provider": "nemo",
-  "text": "My name is Peter, my email is peter@example.com.",
-  "entities": ["first_name", "email"]
+  "language": "zh-Hant",
+  "text": "姓名：王小明，Email：peter@example.com",
+  "entities": ["person", "chinese_name", "email"]
 }
 ```
 
@@ -252,7 +287,7 @@ type PiiPreviewResponse = {
   provider: PiiProvider;
   engine: string;
   model: string;
-  language: "en";
+  language: PiiLanguage;
   score_threshold: number;
   detect_encoded_pii: boolean;
   masked: string;
@@ -272,7 +307,7 @@ type PiiPreviewResponse = {
 );
 ```
 
-If `provider` is omitted, the backend uses `PII_PROVIDER`, defaulting to `nemo`. `language` currently supports only `"en"`. `score_threshold` must be greater than `0` and less than or equal to `1`.
+If `provider` is omitted, the backend uses `PII_PROVIDER`, defaulting to `nemo`. `score_threshold` must be greater than `0` and less than or equal to `1`.
 
 ### Preview Combined Redaction
 
@@ -286,7 +321,7 @@ type RedactionPreviewRequest = {
   text: string;
   enable_pii?: boolean;
   provider?: "nemo" | "openai-guardrails";
-  language?: "en";
+  language?: PiiLanguage;
   score_threshold?: number;
   entities?: string[];
   detect_encoded_pii?: boolean;

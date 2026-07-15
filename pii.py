@@ -13,29 +13,57 @@ logging.getLogger("presidio-analyzer").setLevel(logging.ERROR)
 
 
 DEFAULT_LANGUAGE = "en"
+DEFAULT_NEMO_LANGUAGE = "auto"
+DEFAULT_OPENAI_GUARDRAILS_LANGUAGE = "en"
 DEFAULT_SCORE_THRESHOLD = 0.5
 DEFAULT_PROVIDER = "nemo"
 NEMO_PROVIDER = "nemo"
 OPENAI_GUARDRAILS_PROVIDER = "openai-guardrails"
 DEFAULT_GLINER_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions"
 DEFAULT_GLINER_MODEL = "nvidia/gliner-pii"
+NEMO_LANGUAGE_ALIASES = {
+    "auto": "auto",
+    "en": "en",
+    "zh": "zh",
+    "zh-cn": "zh-Hans",
+    "zh-hans": "zh-Hans",
+    "zh-tw": "zh-Hant",
+    "zh-hant": "zh-Hant",
+}
+OPENAI_GUARDRAILS_LANGUAGE_ALIASES = {
+    "en": "en",
+}
 
 # GLiNER-PII accepts custom labels; this list provides useful defaults for the UI.
 DEFAULT_SUPPORTED_ENTITIES = [
     "first_name",
     "last_name",
+    "full_name",
     "person",
+    "chinese_name",
     "email",
+    "email_address",
     "phone_number",
+    "mobile_phone",
+    "telephone",
     "ssn",
+    "national_id",
+    "identity_document",
+    "taiwan_id",
+    "china_id",
     "street_address",
     "address",
+    "location",
     "city",
     "state",
     "postcode",
     "country",
     "date",
+    "date_of_birth",
+    "birthdate",
     "time",
+    "age",
+    "gender",
     "occupation",
     "organization",
     "account_number",
@@ -46,6 +74,7 @@ DEFAULT_SUPPORTED_ENTITIES = [
     "mac_address",
     "url",
     "username",
+    "messaging_id",
     "password",
     "api_key",
     "passport_number",
@@ -198,7 +227,7 @@ class PiiDetector:
     async def preview(
         self,
         text: str,
-        language: str = DEFAULT_LANGUAGE,
+        language: str | None = None,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         entities: list[str] | None = None,
         provider: str | None = None,
@@ -214,9 +243,14 @@ class PiiDetector:
                 detect_encoded_pii=detect_encoded_pii,
             )
 
-        if language != DEFAULT_LANGUAGE:
+        normalized_language = _normalize_language(
+            language or DEFAULT_NEMO_LANGUAGE,
+            NEMO_LANGUAGE_ALIASES,
+        )
+        if normalized_language is None:
             raise ValueError(
-                "Only English ('en') is supported by the NeMo GLiNER-PII preview."
+                "NeMo GLiNER-PII preview language must be one of: "
+                + ", ".join(sorted(set(NEMO_LANGUAGE_ALIASES.values())))
             )
 
         if not 0 < score_threshold <= 1:
@@ -253,7 +287,7 @@ class PiiDetector:
             "engine": "nemo-gliner-pii",
             "model": self.model,
             "server_endpoint": self.server_endpoint,
-            "language": language,
+            "language": normalized_language,
             "score_threshold": score_threshold,
             "detect_encoded_pii": detect_encoded_pii,
             "masked": _mask_text(text, pii_entities),
@@ -265,12 +299,16 @@ class PiiDetector:
 
 async def _openai_guardrails_preview(
     text: str,
-    language: str,
+    language: str | None,
     score_threshold: float,
     entities: list[str] | None,
     detect_encoded_pii: bool,
 ) -> dict[str, Any]:
-    if language != DEFAULT_LANGUAGE:
+    normalized_language = _normalize_language(
+        language or DEFAULT_OPENAI_GUARDRAILS_LANGUAGE,
+        OPENAI_GUARDRAILS_LANGUAGE_ALIASES,
+    )
+    if normalized_language is None:
         raise ValueError(
             "Only English ('en') is supported by OpenAI Guardrails PII."
         )
@@ -318,7 +356,7 @@ async def _openai_guardrails_preview(
         "provider": OPENAI_GUARDRAILS_PROVIDER,
         "engine": "OpenAI Guardrails Contains PII",
         "model": "Microsoft Presidio",
-        "language": language,
+        "language": normalized_language,
         "score_threshold": score_threshold,
         "detect_encoded_pii": detect_encoded_pii,
         "masked": masked,
@@ -473,6 +511,18 @@ def _normalize_provider(provider: str | None) -> str:
         "provider must be one of: "
         f"{NEMO_PROVIDER}, {OPENAI_GUARDRAILS_PROVIDER}"
     )
+
+
+def default_language_for_provider(provider: str | None) -> str:
+    provider_name = _normalize_provider(provider)
+    if provider_name == OPENAI_GUARDRAILS_PROVIDER:
+        return DEFAULT_OPENAI_GUARDRAILS_LANGUAGE
+    return DEFAULT_NEMO_LANGUAGE
+
+
+def _normalize_language(language: str, aliases: dict[str, str]) -> str | None:
+    raw = language.strip().lower().replace("_", "-")
+    return aliases.get(raw)
 
 
 def _coerce_int(value: Any) -> int | None:
