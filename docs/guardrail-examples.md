@@ -44,9 +44,9 @@ Use it with:
 }
 ```
 
-## Keyword Masking
+## Deterministic Redaction
 
-`masking.yml` defines deterministic keyword and regex masking rules.
+`masking.yml` defines deterministic literal and regex masking rules.
 This runs before and after the NeMo Guardrails API call, so sensitive text is masked in both directions.
 
 Preview masking without calling OpenAI:
@@ -55,7 +55,7 @@ Preview masking without calling OpenAI:
 curl -X POST http://localhost:8000/v1/masking/preview \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Email admin@example.com about internal-project-x and OPENAI_API_KEY sk-test_abcdefghijklmnopqrstuvwxyz"
+    "text": "Email admin@example.com with OPENAI_API_KEY sk-test_abcdefghijklmnopqrstuvwxyz and AKIAIOSFODNN7EXAMPLE"
   }'
 ```
 
@@ -65,7 +65,7 @@ Example output:
 {
   "enabled": true,
   "masked": {
-    "text": "Email [EMAIL] about [INTERNAL_PROJECT] and [SECRET_NAME] [OPENAI_API_KEY]"
+    "text": "Email [EMAIL] with [SECRET_NAME] [OPENAI_API_KEY] and [AWS_ACCESS_KEY_ID]"
   }
 }
 ```
@@ -81,6 +81,47 @@ Email：zihao.chen@email.com -> removed
 Name: Peter Tam -> removed
 Age: 28 years old -> removed
 Gender: female -> removed
+```
+
+## PII Providers
+
+`/v1/pii/preview` and `/v1/redaction/preview` can compare provider-based PII detection after deterministic masking.
+
+NeMo GLiNER-PII uses NVIDIA hosted NIM or a local compatible endpoint:
+
+```bash
+curl -X POST http://localhost:8000/v1/pii/preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "nemo",
+    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
+    "entities": ["first_name", "email", "phone_number"]
+  }'
+```
+
+OpenAI Guardrails PII runs locally through Presidio/spaCy:
+
+```bash
+curl -X POST http://localhost:8000/v1/pii/preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "openai-guardrails",
+    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
+    "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+  }'
+```
+
+In chat, select the provider under `guardrails`:
+
+```json
+{
+  "guardrails": {
+    "config_id": "default",
+    "enable_pii": true,
+    "pii_provider": "openai-guardrails",
+    "pii_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+  }
+}
 ```
 
 ## Dialog Flow

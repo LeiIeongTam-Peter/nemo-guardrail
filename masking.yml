@@ -122,9 +122,3 @@ rules:
     type: regex
     pattern: "\\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|redis|rediss)://[^\\s\"']+"
     replacement: "[DATABASE_URL]"
-
-  - name: example-internal-project
-    type: literal
-    pattern: internal-project-x
-    replacement: "[INTERNAL_PROJECT]"
-    case_sensitive: false

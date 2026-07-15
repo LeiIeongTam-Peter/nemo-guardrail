@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from masking import Masker, build_keyword_rules  # noqa: E402
+from masking import Masker, PiiMaskOptions, mask_pii_value  # noqa: E402
 from nemoguardrails import RailsConfig  # noqa: E402
-from policies import PolicyConflictError, PolicyStore, PolicyValidationError  # noqa: E402
+from pii import OPENAI_GUARDRAILS_PROVIDER, PiiDetector  # noqa: E402
 
 
 MASKING_CASES = [
@@ -144,12 +145,6 @@ MASKING_CASES = [
         "expected": "[DATABASE_URL]",
         "forbidden": "postgresql://user:pass@localhost:5432/app",
     },
-    {
-        "name": "project-keyword",
-        "input": "Project internal-project-x",
-        "expected": "[INTERNAL_PROJECT]",
-        "forbidden": "internal-project-x",
-    },
 ]
 
 
@@ -199,17 +194,48 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-url", default="", help="Optional running service URL, for HTTP smoke tests.")
     parser.add_argument("--live", action="store_true", help="Run live /v1/chat/completions tests. Uses OpenAI tokens.")
+    parser.add_argument(
+        "--nemo-pii",
+        action="store_true",
+        help="Run live NeMo GLiNER-PII preview tests. Requires NVIDIA_API_KEY or a local NEMO_PII_SERVER_ENDPOINT.",
+    )
+    parser.add_argument(
+        "--openai-pii",
+        action="store_true",
+        help="Run OpenAI Guardrails PII tests. Uses local Presidio/spaCy, not OpenAI API tokens.",
+    )
     args = parser.parse_args()
 
     failures: list[str] = []
 
     _run_masking_tests(failures)
-    _run_policy_store_tests(failures)
+    _run_pii_value_mask_tests(failures)
+    if args.nemo_pii:
+        _run_pii_preview_tests(failures)
+    else:
+        print("pii-preview: skipped (pass --nemo-pii to call NeMo GLiNER-PII)")
+    if args.openai_pii:
+        _run_openai_pii_preview_tests(failures)
+    else:
+        print("openai-pii-preview: skipped (pass --openai-pii to run OpenAI Guardrails PII)")
     _run_config_tests(failures)
 
     if args.server_url:
         _run_http_preview_tests(args.server_url.rstrip("/"), failures)
-        _run_http_policy_tests(args.server_url.rstrip("/"), failures)
+        _run_http_redaction_tests(
+            args.server_url.rstrip("/"),
+            failures,
+            use_nemo_pii=args.nemo_pii,
+            use_openai_pii=args.openai_pii,
+        )
+        if args.nemo_pii:
+            _run_http_pii_tests(args.server_url.rstrip("/"), failures)
+        else:
+            print("http-pii: skipped (pass --nemo-pii to call NeMo GLiNER-PII)")
+        if args.openai_pii:
+            _run_http_openai_pii_tests(args.server_url.rstrip("/"), failures)
+        else:
+            print("http-openai-pii: skipped (pass --openai-pii to run OpenAI Guardrails PII)")
 
     if args.live:
         if not args.server_url:
@@ -237,137 +263,39 @@ def _run_masking_tests(failures: list[str]) -> None:
         print(f"masking:{case['name']}: {masked}")
 
 
-def _run_policy_store_tests(failures: list[str]) -> None:
-    with TemporaryDirectory() as tmp_dir:
-        store = PolicyStore(Path(tmp_dir) / "policies.sqlite3")
+def _run_pii_value_mask_tests(failures: list[str]) -> None:
+    class FakePiiDetector:
+        async def preview(self, text: str, **_: Any) -> dict[str, str]:
+            return {
+                "masked": text.replace("Peter", "[FIRST_NAME]").replace(
+                    "peter@example.com",
+                    "[EMAIL]",
+                )
+            }
 
-        try:
-            policy = store.create_policy(
-                {
-                    "id": "resume-client-a",
-                    "name": "Resume Client A",
-                    "description": "Chinese and English redaction keywords",
-                    "enabled": True,
-                    "replacement": "[REDACTED]",
-                    "case_sensitive": False,
-                    "keywords": ["秘密專案", "ClientName"],
-                }
-            )
-        except Exception as exc:
-            failures.append(f"policy-store:create: failed: {exc}")
-            return
-
-        listed = store.list_policies()
-        _assert_contains(json.dumps([item.id for item in listed]), policy.id, "policy-store:list", failures)
-
-        loaded = store.get_policy(policy.id)
-        if loaded is None:
-            failures.append("policy-store:get: expected policy to exist")
-            return
-
-        policy_masker = Masker.from_path(str(ROOT / "masking.yml")).with_rules(
-            build_keyword_rules(
-                policy_id=loaded.id,
-                keywords=loaded.keywords,
-                replacement=loaded.replacement,
-                case_sensitive=loaded.case_sensitive,
-            ),
-            prepend=True,
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": "My name is Peter and my email is peter@example.com.",
+            }
+        ],
+    }
+    masked = asyncio.run(
+        mask_pii_value(
+            payload,
+            FakePiiDetector(),
+            PiiMaskOptions(language="en", score_threshold=0.5, entities=None),
         )
-        masked = policy_masker.mask_text("秘密專案 belongs to clientname and admin@example.com")
-        _assert_contains(masked, "[REDACTED]", "policy-store:mask-chinese", failures)
-        _assert_contains(masked, "[EMAIL]", "policy-store:mask-built-in", failures)
-        _assert_not_contains(masked, "秘密專案", "policy-store:mask-chinese", failures)
-        _assert_not_contains(masked, "clientname", "policy-store:mask-case-insensitive", failures)
-        _assert_not_contains(masked, "admin@example.com", "policy-store:mask-built-in", failures)
+    )
+    text = json.dumps(masked, ensure_ascii=False, sort_keys=True)
+    for expected in ["[FIRST_NAME]", "[EMAIL]", "gpt-4o-mini"]:
+        _assert_contains(text, expected, "pii-value-mask", failures)
+    for forbidden in ["Peter", "peter@example.com"]:
+        _assert_not_contains(text, forbidden, "pii-value-mask", failures)
 
-        label_policy_masker = Masker.from_path(str(ROOT / "masking.yml")).with_rules(
-            build_keyword_rules(
-                policy_id=loaded.id,
-                keywords=["email", "name"],
-                replacement=loaded.replacement,
-                case_sensitive=False,
-            ),
-            prepend=True,
-        )
-        label_masked = label_policy_masker.mask_text("client-name and admin@example.com")
-        _assert_contains(label_masked, "client-[REDACTED]", "policy-store:mask-label", failures)
-        _assert_contains(label_masked, "[EMAIL]", "policy-store:mask-placeholder", failures)
-        _assert_not_contains(label_masked, "[[REDACTED]]", "policy-store:mask-placeholder", failures)
-        label_masked_again = label_policy_masker.mask_text(label_masked)
-        _assert_contains(label_masked_again, "[EMAIL]", "policy-store:mask-placeholder-second-pass", failures)
-        _assert_not_contains(
-            label_masked_again,
-            "[[REDACTED]]",
-            "policy-store:mask-placeholder-second-pass",
-            failures,
-        )
-
-        conversational_masked = label_policy_masker.mask_text(
-            "hi, my name is  peter, my email is lei23lei@gmail.com"
-        )
-        _assert_contains(
-            conversational_masked,
-            "my [REDACTED] is [REDACTED]",
-            "policy-store:mask-conversational-name",
-            failures,
-        )
-        _assert_contains(conversational_masked, "[EMAIL]", "policy-store:mask-conversational-email", failures)
-        _assert_not_contains(conversational_masked, "peter", "policy-store:mask-conversational-name", failures)
-        _assert_not_contains(
-            conversational_masked,
-            "lei23lei@gmail.com",
-            "policy-store:mask-conversational-email",
-            failures,
-        )
-
-        typo_masked = label_policy_masker.mask_text("hi, my ame is peter, my email is lei23lei@gmail.com")
-        _assert_not_contains(typo_masked, "peter", "policy-store:mask-name-typo", failures)
-
-        i_am_masked = label_policy_masker.mask_text(
-            "I am Peter, what is your name? and do you know my name?"
-        )
-        _assert_contains(i_am_masked, "I am [REDACTED]", "policy-store:mask-i-am-name", failures)
-        _assert_not_contains(i_am_masked, "Peter", "policy-store:mask-i-am-name", failures)
-
-        greeting_masked = label_policy_masker.mask_text(
-            "Hi Peter! I don't have a personal [REDACTED]. Yes, I know your [REDACTED] is Peter."
-        )
-        _assert_contains(greeting_masked, "Hi [REDACTED]!", "policy-store:mask-greeting-name", failures)
-        _assert_contains(
-            greeting_masked,
-            "your [REDACTED] is [REDACTED]",
-            "policy-store:mask-redacted-label-name-value",
-            failures,
-        )
-        _assert_not_contains(greeting_masked, "Peter", "policy-store:mask-response-name", failures)
-
-        try:
-            store.create_policy({"id": policy.id, "keywords": ["duplicate"]})
-        except PolicyConflictError:
-            print("policy-store:duplicate: rejected")
-        except Exception as exc:
-            failures.append(f"policy-store:duplicate: wrong error: {exc}")
-        else:
-            failures.append("policy-store:duplicate: expected conflict")
-
-        try:
-            store.create_policy({"id": "bad id", "keywords": ["x"]})
-        except PolicyValidationError:
-            print("policy-store:invalid-id: rejected")
-        except Exception as exc:
-            failures.append(f"policy-store:invalid-id: wrong error: {exc}")
-        else:
-            failures.append("policy-store:invalid-id: expected validation error")
-
-        disabled = store.update_policy(policy.id, {"enabled": False})
-        if disabled is None or disabled.enabled:
-            failures.append("policy-store:update: expected disabled policy")
-
-        if not store.delete_policy(policy.id):
-            failures.append("policy-store:delete: expected deleted policy")
-
-        print(f"policy-store:mask: {masked}")
+    print(f"pii-value-mask: {text}")
 
 
 def _run_config_tests(failures: list[str]) -> None:
@@ -382,6 +310,44 @@ def _run_config_tests(failures: list[str]) -> None:
             failures.append(f"config:{path.name}: failed to load: {exc}")
         else:
             print(f"config:{path.name}: loaded")
+
+
+def _run_pii_preview_tests(failures: list[str]) -> None:
+    if not _nemo_pii_configured():
+        failures.append("pii-preview: set NVIDIA_API_KEY, NEMO_PII_API_KEY, or NEMO_PII_SERVER_ENDPOINT")
+        return
+
+    result = asyncio.run(
+        PiiDetector().preview(
+            "My name is Peter, my email is peter@example.com, phone is 416-555-0199."
+        )
+    )
+    text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    for expected in ["[EMAIL]", "[PHONE_NUMBER]"]:
+        _assert_contains(text, expected, "pii-preview", failures)
+    for forbidden in ["Peter", "peter@example.com", "416-555-0199"]:
+        _assert_not_contains(result["masked"], forbidden, "pii-preview", failures)
+
+    print(f"pii-preview: {result['masked']}")
+
+
+def _run_openai_pii_preview_tests(failures: list[str]) -> None:
+    result = asyncio.run(
+        PiiDetector().preview(
+            "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
+            provider=OPENAI_GUARDRAILS_PROVIDER,
+            entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+        )
+    )
+    text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    for expected in [OPENAI_GUARDRAILS_PROVIDER, "[PERSON]", "[EMAIL_ADDRESS]", "[PHONE_NUMBER]"]:
+        _assert_contains(text, expected, "openai-pii-preview", failures)
+    for forbidden in ["Peter", "peter@example.com", "416-555-0199"]:
+        _assert_not_contains(result["masked"], forbidden, "openai-pii-preview", failures)
+
+    print(f"openai-pii-preview: {result['masked']}")
 
 
 def _run_http_preview_tests(server_url: str, failures: list[str]) -> None:
@@ -405,81 +371,152 @@ def _run_http_preview_tests(server_url: str, failures: list[str]) -> None:
     print(f"http-preview: {text}")
 
 
-def _run_http_policy_tests(server_url: str, failures: list[str]) -> None:
-    policy_id = "smoke-policy"
-    _request_json(f"{server_url}/v1/policies/{policy_id}", method="DELETE", ignore_http={404})
-
-    try:
-        _request_json(
-            f"{server_url}/v1/chat/completions",
-            {
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": "No OpenAI call should happen."}],
-                "guardrails": {"config_id": "default", "policy_id": "missing-policy"},
-            },
-            method="POST",
-        )
-    except RuntimeError as exc:
-        if "HTTP 404" not in str(exc):
-            failures.append(f"http-policy:missing-policy: expected 404, got: {exc}")
-    else:
-        failures.append("http-policy:missing-policy: expected 404")
-
+def _run_http_pii_tests(server_url: str, failures: list[str]) -> None:
     payload = {
-        "id": policy_id,
-        "name": "Smoke Policy",
-        "enabled": True,
-        "replacement": "[REDACTED]",
-        "case_sensitive": False,
-        "keywords": ["秘密專案", "ClientName", "name", "email"],
+        "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199."
     }
 
     try:
-        created = _request_json(f"{server_url}/v1/policies", payload, method="POST")
-        preview = _request_json(
-            f"{server_url}/v1/policies/{policy_id}/preview",
-            {"text": "秘密專案 and clientname and admin@example.com"},
-            method="POST",
-        )
-        debug_chat = _request_json(
-            f"{server_url}/v1/policies/{policy_id}/debug-chat-request",
+        response = _post_json(f"{server_url}/v1/pii/preview", payload)
+    except Exception as exc:
+        failures.append(f"http-pii: request failed: {exc}")
+        return
+
+    text = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    for expected in ["[EMAIL]", "[PHONE_NUMBER]"]:
+        _assert_contains(text, expected, "http-pii", failures)
+    for forbidden in ["Peter", "peter@example.com", "416-555-0199"]:
+        _assert_not_contains(response["masked"], forbidden, "http-pii", failures)
+
+    print(f"http-pii: {response['masked']}")
+
+
+def _run_http_openai_pii_tests(server_url: str, failures: list[str]) -> None:
+    payload = {
+        "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
+        "provider": OPENAI_GUARDRAILS_PROVIDER,
+        "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+    }
+
+    try:
+        response = _post_json(f"{server_url}/v1/pii/preview", payload)
+    except Exception as exc:
+        failures.append(f"http-openai-pii: request failed: {exc}")
+        return
+
+    text = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    for expected in [OPENAI_GUARDRAILS_PROVIDER, "[PERSON]", "[EMAIL_ADDRESS]", "[PHONE_NUMBER]"]:
+        _assert_contains(text, expected, "http-openai-pii", failures)
+    for forbidden in ["Peter", "peter@example.com", "416-555-0199"]:
+        _assert_not_contains(response["masked"], forbidden, "http-openai-pii", failures)
+
+    print(f"http-openai-pii: {response['masked']}")
+
+
+def _run_http_redaction_tests(
+    server_url: str,
+    failures: list[str],
+    use_nemo_pii: bool,
+    use_openai_pii: bool,
+) -> None:
+    try:
+        deterministic = _post_json(
+            f"{server_url}/v1/redaction/preview",
             {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": "my name is Peter, my email is admin@example.com",
-                    }
-                ],
-                "guardrails": {
-                    "config_id": "default",
-                    "policy_id": policy_id,
-                },
+                "text": "王小明 can be reached at admin@example.com",
+                "enable_pii": False,
             },
-            method="POST",
         )
     except Exception as exc:
-        failures.append(f"http-policy: request failed: {exc}")
+        failures.append(f"http-redaction: request failed: {exc}")
         return
-    finally:
-        _request_json(f"{server_url}/v1/policies/{policy_id}", method="DELETE", ignore_http={404})
 
-    _assert_contains(json.dumps(created, ensure_ascii=False), policy_id, "http-policy:create", failures)
-    text = json.dumps(preview, ensure_ascii=False, sort_keys=True)
-    for expected in ["[REDACTED]", "[EMAIL]"]:
-        _assert_contains(text, expected, "http-policy:preview", failures)
-    for forbidden in ["秘密專案", "clientname", "admin@example.com"]:
-        _assert_not_contains(text, forbidden, "http-policy:preview", failures)
+    deterministic_text = json.dumps(deterministic, ensure_ascii=False, sort_keys=True)
+    for expected in ["[NAME]", "[EMAIL]"]:
+        _assert_contains(deterministic_text, expected, "http-redaction:deterministic", failures)
+    for forbidden in ["王小明", "admin@example.com"]:
+        _assert_not_contains(deterministic["masked"], forbidden, "http-redaction:deterministic", failures)
+    _assert_not_contains(deterministic_text, "nemo-gliner-pii", "http-redaction:deterministic", failures)
 
-    debug_text = json.dumps(debug_chat, ensure_ascii=False, sort_keys=True)
-    forwarded_text = json.dumps(debug_chat.get("forwarded_request", {}), ensure_ascii=False, sort_keys=True)
-    for expected in ["[REDACTED]", "[EMAIL]"]:
-        _assert_contains(debug_text, expected, "http-policy:debug-chat", failures)
-    for forbidden in ["Peter", "admin@example.com"]:
-        _assert_not_contains(debug_text, forbidden, "http-policy:debug-chat", failures)
-    _assert_not_contains(forwarded_text, '"policy_id"', "http-policy:debug-chat-forwarded", failures)
+    _assert_http_error(
+        f"{server_url}/v1/redaction/preview",
+        {
+            "text": "admin@example.com",
+            "policy_id": "legacy-policy",
+            "enable_pii": False,
+        },
+        400,
+        "http-redaction:legacy-policy-preview",
+        failures,
+    )
+    _assert_http_error(
+        f"{server_url}/v1/chat/completions",
+        {
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "No OpenAI call should happen."}],
+            "guardrails": {"config_id": "default", "policy_id": "legacy-policy"},
+        },
+        400,
+        "http-redaction:legacy-policy-chat",
+        failures,
+    )
 
-    print(f"http-policy: {text}")
+    if not use_nemo_pii:
+        print(f"http-redaction: {deterministic['masked']}")
+    else:
+        try:
+            combined = _post_json(
+                f"{server_url}/v1/redaction/preview",
+                {
+                    "text": "My name is Peter and my email is peter@example.com.",
+                    "enable_pii": True,
+                },
+            )
+        except Exception as exc:
+            failures.append(f"http-redaction:nemo-pii: request failed: {exc}")
+            return
+
+        combined_text = json.dumps(combined, ensure_ascii=False, sort_keys=True)
+        for expected in ["nemo", "[EMAIL]"]:
+            _assert_contains(combined_text, expected, "http-redaction:nemo-pii", failures)
+        for forbidden in ["Peter", "peter@example.com"]:
+            _assert_not_contains(combined["masked"], forbidden, "http-redaction:nemo-pii", failures)
+
+        print(f"http-redaction:nemo-pii: {combined['masked']}")
+
+    if not use_openai_pii:
+        return
+
+    try:
+        openai_combined = _post_json(
+            f"{server_url}/v1/redaction/preview",
+            {
+                "text": "My name is Peter and my email is peter@example.com.",
+                "provider": OPENAI_GUARDRAILS_PROVIDER,
+                "enable_pii": True,
+                "entities": ["PERSON", "EMAIL_ADDRESS"],
+            },
+        )
+    except Exception as exc:
+        failures.append(f"http-redaction:openai-pii: request failed: {exc}")
+        return
+
+    openai_combined_text = json.dumps(openai_combined, ensure_ascii=False, sort_keys=True)
+    for expected in [OPENAI_GUARDRAILS_PROVIDER, "[PERSON]", "[EMAIL]"]:
+        _assert_contains(openai_combined_text, expected, "http-redaction:openai-pii", failures)
+    for forbidden in ["Peter", "peter@example.com"]:
+        _assert_not_contains(openai_combined["masked"], forbidden, "http-redaction:openai-pii", failures)
+
+    print(f"http-redaction:openai-pii: {openai_combined['masked']}")
+
+
+def _nemo_pii_configured() -> bool:
+    return bool(
+        os.getenv("NVIDIA_API_KEY")
+        or os.getenv("NEMO_PII_API_KEY")
+        or os.getenv("NEMO_PII_SERVER_ENDPOINT")
+        or os.getenv("GLINER_SERVER_ENDPOINT")
+    )
 
 
 def _run_live_chat_tests(server_url: str, failures: list[str]) -> None:
@@ -530,6 +567,22 @@ def _request_json(
         if exc.code in ignore_http:
             return {}
         raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+
+
+def _assert_http_error(
+    url: str,
+    payload: dict[str, Any],
+    expected_status: int,
+    label: str,
+    failures: list[str],
+) -> None:
+    try:
+        _request_json(url, payload, method="POST")
+    except RuntimeError as exc:
+        if f"HTTP {expected_status}" not in str(exc):
+            failures.append(f"{label}: expected HTTP {expected_status}, got: {exc}")
+    else:
+        failures.append(f"{label}: expected HTTP {expected_status}")
 
 
 def _extract_message_content(response: dict[str, Any]) -> str:
