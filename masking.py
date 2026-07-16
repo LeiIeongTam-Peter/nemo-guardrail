@@ -27,9 +27,7 @@ class MaskRule:
 class PiiMaskOptions:
     language: str
     score_threshold: float
-    entities: list[str] | None
     provider: str | None = None
-    detect_encoded_pii: bool = False
 
 
 class Masker:
@@ -294,8 +292,10 @@ class MaskingMiddleware:
         provider = guardrails.pop("pii_provider", None)
         language = guardrails.pop("pii_language", None)
         score_threshold = guardrails.pop("pii_score_threshold", DEFAULT_SCORE_THRESHOLD)
-        entities = guardrails.pop("pii_entities", None)
-        detect_encoded_pii = guardrails.pop("pii_detect_encoded", False)
+        guardrails.pop("pii_detect_encoded", None)
+        entities_present = "pii_entities" in guardrails
+        if entities_present:
+            guardrails.pop("pii_entities", None)
 
         if not isinstance(enable_pii, bool):
             return _json_error(400, "guardrails.enable_pii must be a boolean.")
@@ -308,29 +308,27 @@ class MaskingMiddleware:
             return _json_error(503, "PII detector is not configured.")
         if provider is not None and not isinstance(provider, str):
             return _json_error(400, "guardrails.pii_provider must be a string.")
+        try:
+            default_language = default_language_for_provider(provider)
+        except ValueError as exc:
+            return _json_error(400, str(exc))
         if language is not None and not isinstance(language, str):
             return _json_error(400, "guardrails.pii_language must be a string.")
         if language is None:
-            try:
-                language = default_language_for_provider(provider)
-            except ValueError as exc:
-                return _json_error(400, str(exc))
+            language = default_language
         if not isinstance(score_threshold, int | float):
             return _json_error(400, "guardrails.pii_score_threshold must be a number.")
-        if entities is not None and not (
-            isinstance(entities, list) and all(isinstance(item, str) for item in entities)
-        ):
-            return _json_error(400, "guardrails.pii_entities must be a list of strings.")
-        if not isinstance(detect_encoded_pii, bool):
-            return _json_error(400, "guardrails.pii_detect_encoded must be a boolean.")
+        if entities_present:
+            return _json_error(
+                400,
+                "guardrails.pii_entities is no longer supported. NeMo GLiNER-PII uses server default labels.",
+            )
 
         return (
             PiiMaskOptions(
                 language=language,
                 score_threshold=float(score_threshold),
-                entities=entities,
                 provider=provider,
-                detect_encoded_pii=detect_encoded_pii,
             ),
             sanitized_body,
         )
@@ -416,9 +414,7 @@ async def _mask_pii_text(text: str, pii_detector: Any, options: PiiMaskOptions) 
         text=text,
         language=options.language,
         score_threshold=options.score_threshold,
-        entities=options.entities,
         provider=options.provider,
-        detect_encoded_pii=options.detect_encoded_pii,
     )
     return str(result.get("masked", text))
 

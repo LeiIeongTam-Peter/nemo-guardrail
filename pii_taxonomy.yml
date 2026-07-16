@@ -1,9 +1,8 @@
 version: 1
 description: >
-  Bilingual PII taxonomy for deterministic masking rules, NeMo GLiNER labels,
-  and OpenAI Guardrails/Presidio entity mappings. Deterministic rules are the
-  source of truth for fixed formats; model providers are a second-pass fallback
-  for natural-language entities.
+  Bilingual PII taxonomy for deterministic masking rules. Deterministic rules
+  are the source of truth for fixed formats; NeMo GLiNER-PII uses server
+  default labels and this file does not configure model labels.
 
 providers:
   deterministic:
@@ -12,18 +11,6 @@ providers:
     notes:
       - Best for email, phone, ID numbers, secrets, and resume/contact fields.
       - Implemented in masking.yml.
-  nemo:
-    role: model-based PII span detection
-    languages: ["en", "zh-Hant", "zh-Hans"]
-    notes:
-      - Uses GLiNER labels. Chinese quality must be validated with local evals.
-      - Good candidate for names, addresses, organizations, and natural text.
-  openai-guardrails:
-    role: Presidio-based local PII masking
-    languages: ["en"]
-    notes:
-      - Keep as the English Presidio provider.
-      - Do not rely on it for Chinese names or Chinese addresses.
 
 entities:
   - id: person_name
@@ -35,8 +22,6 @@ entities:
       - introduced-chinese-name
       - labeled-name-field
       - role-heading-chinese-name-parentheses
-    nemo_labels: ["person", "first_name", "last_name", "full_name", "chinese_name"]
-    openai_guardrails_entities: ["PERSON"]
 
   - id: email
     placeholder: "[EMAIL]"
@@ -45,8 +30,6 @@ entities:
     deterministic_rule_names:
       - email-address
       - labeled-email-field
-    nemo_labels: ["email", "email_address"]
-    openai_guardrails_entities: ["EMAIL_ADDRESS"]
 
   - id: phone
     placeholder: "[PHONE]"
@@ -57,8 +40,6 @@ entities:
       - taiwan-mobile-phone-number
       - taiwan-landline-phone-number
       - labeled-phone-field
-    nemo_labels: ["phone_number", "mobile_phone", "telephone"]
-    openai_guardrails_entities: ["PHONE_NUMBER"]
 
   - id: national_id
     placeholder: "[NATIONAL_ID]"
@@ -69,8 +50,6 @@ entities:
       - taiwan-resident-certificate-number
       - china-national-id
       - labeled-national-id-field
-    nemo_labels: ["national_id", "identity_document", "tax_id", "taiwan_id", "china_id"]
-    openai_guardrails_entities: ["NRP"]
 
   - id: birthdate
     placeholder: "[DATE]"
@@ -78,8 +57,6 @@ entities:
     zh_keywords: ["生日", "出生日期", "出生年月日", "出生年月"]
     deterministic_rule_names:
       - labeled-birthdate-field
-    nemo_labels: ["date_of_birth", "birthdate", "date"]
-    openai_guardrails_entities: ["DATE_TIME"]
 
   - id: age
     placeholder: "[AGE]"
@@ -88,8 +65,6 @@ entities:
     deterministic_rule_names:
       - generic-age
       - labeled-age-field
-    nemo_labels: ["age"]
-    openai_guardrails_entities: []
 
   - id: gender
     placeholder: "[GENDER]"
@@ -97,8 +72,6 @@ entities:
     zh_keywords: ["性別"]
     deterministic_rule_names:
       - labeled-gender-field
-    nemo_labels: ["gender", "sex"]
-    openai_guardrails_entities: []
 
   - id: address
     placeholder: "[ADDRESS]"
@@ -107,8 +80,6 @@ entities:
     deterministic_rule_names:
       - labeled-address-field
       - inline-address-phrase
-    nemo_labels: ["street_address", "address", "location", "city", "state", "postcode", "country"]
-    openai_guardrails_entities: ["LOCATION"]
 
   - id: passport
     placeholder: "[PASSPORT]"
@@ -116,8 +87,6 @@ entities:
     zh_keywords: ["護照", "護照號碼"]
     deterministic_rule_names:
       - labeled-passport-field
-    nemo_labels: ["passport_number", "identity_document"]
-    openai_guardrails_entities: ["US_PASSPORT", "IN_PASSPORT", "IT_PASSPORT"]
 
   - id: messaging_id
     placeholder: "[MESSAGING_ID]"
@@ -125,8 +94,6 @@ entities:
     zh_keywords: ["LINE ID", "微信", "通訊軟體", "即時通訊"]
     deterministic_rule_names:
       - labeled-messaging-id-field
-    nemo_labels: ["username", "messaging_id", "account_id"]
-    openai_guardrails_entities: []
 
   - id: credit_card
     placeholder: "[CREDIT_CARD]"
@@ -134,8 +101,6 @@ entities:
     zh_keywords: ["信用卡", "卡號"]
     deterministic_rule_names:
       - credit-card-number
-    nemo_labels: ["credit_card_number"]
-    openai_guardrails_entities: ["CREDIT_CARD"]
 
   - id: secret
     placeholder: "[TOKEN]"
@@ -151,5 +116,3 @@ entities:
       - github-token-fine-grained
       - bearer-token
       - database-url
-    nemo_labels: ["api_key", "password", "username", "account_number"]
-    openai_guardrails_entities: ["CRYPTO", "US_BANK_NUMBER", "IBAN_CODE"]

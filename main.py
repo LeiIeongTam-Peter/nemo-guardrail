@@ -102,8 +102,6 @@ def create_app():
             provider,
             language,
             score_threshold,
-            entities,
-            detect_encoded_pii,
         ) = _parse_pii_preview_payload(payload)
 
         try:
@@ -112,8 +110,6 @@ def create_app():
                 provider=provider,
                 language=language,
                 score_threshold=float(score_threshold),
-                entities=entities,
-                detect_encoded_pii=detect_encoded_pii,
             )
         except PiiConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -129,8 +125,6 @@ def create_app():
             provider,
             language,
             score_threshold,
-            entities,
-            detect_encoded_pii,
         ) = _parse_pii_preview_payload(payload)
         enable_pii = payload.get("enable_pii", True)
         if not isinstance(enable_pii, bool):
@@ -155,8 +149,6 @@ def create_app():
                     provider=provider,
                     language=language,
                     score_threshold=score_threshold,
-                    entities=entities,
-                    detect_encoded_pii=detect_encoded_pii,
                 )
             except PiiConfigurationError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -175,7 +167,6 @@ def create_app():
             "score_threshold": score_threshold,
             "enable_pii": enable_pii,
             "pii_provider": pii_provider,
-            "pii_detect_encoded": detect_encoded_pii,
             "stages": stages,
             "deterministic": {
                 "enabled": masker.enabled,
@@ -190,7 +181,7 @@ def create_app():
 
 def _parse_pii_preview_payload(
     payload: dict[str, Any],
-) -> tuple[str, str | None, str, float, list[str] | None, bool]:
+) -> tuple[str, str | None, str, float]:
     text = payload.get("text")
     if not isinstance(text, str):
         raise HTTPException(status_code=400, detail="text must be a string.")
@@ -198,31 +189,28 @@ def _parse_pii_preview_payload(
     provider = payload.get("provider")
     if provider is not None and not isinstance(provider, str):
         raise HTTPException(status_code=400, detail="provider must be a string.")
+    try:
+        default_language = default_language_for_provider(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     language = payload.get("language")
     if not isinstance(language, str):
         if language is not None:
             raise HTTPException(status_code=400, detail="language must be a string.")
-        try:
-            language = default_language_for_provider(provider)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        language = default_language
 
     score_threshold = payload.get("score_threshold", DEFAULT_SCORE_THRESHOLD)
     if not isinstance(score_threshold, int | float):
         raise HTTPException(status_code=400, detail="score_threshold must be a number.")
 
-    entities = payload.get("entities")
-    if entities is not None and not (
-        isinstance(entities, list) and all(isinstance(item, str) for item in entities)
-    ):
-        raise HTTPException(status_code=400, detail="entities must be a list of strings.")
+    if "entities" in payload:
+        raise HTTPException(
+            status_code=400,
+            detail="entities is no longer supported. NeMo GLiNER-PII uses server default labels.",
+        )
 
-    detect_encoded_pii = payload.get("detect_encoded_pii", False)
-    if not isinstance(detect_encoded_pii, bool):
-        raise HTTPException(status_code=400, detail="detect_encoded_pii must be a boolean.")
-
-    return text, provider, language, float(score_threshold), entities, detect_encoded_pii
+    return text, provider, language, float(score_threshold)
 
 
 def main():

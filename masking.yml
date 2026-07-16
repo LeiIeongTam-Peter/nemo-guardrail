@@ -27,6 +27,11 @@ rules:
     pattern: "((?:我叫|我是|本人(?:叫|是)?|名字(?:是|叫)|姓名(?:是|為|叫))\\s*)[\\u4e00-\\u9fff]{2,4}(?![\\u4e00-\\u9fff])"
     replacement: "\\1[NAME]"
 
+  - name: introduced-english-name
+    type: regex
+    pattern: "\\b((?i:my\\s+name\\s+is|i\\s+am|i'm|i’m|call\\s+me)\\s+)[A-Z][A-Za-z.'-]*(?:\\s+[A-Z][A-Za-z.'-]*){0,3}(?=\\s*(?:[,.;:!?\\n\\r]|$))"
+    replacement: "\\1[NAME]"
+
   - name: labeled-name-field
     type: regex
     pattern: "(?im)^([^\\S\\r\\n]*(?:名字|姓名|Name)[^\\S\\r\\n]*[:：][^\\S\\r\\n]*)[^\\n\\r]+"

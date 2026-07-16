@@ -83,9 +83,9 @@ Age: 28 years old -> removed
 Gender: female -> removed
 ```
 
-## PII Providers
+## NeMo PII
 
-`/v1/pii/preview` and `/v1/redaction/preview` can compare provider-based PII detection after deterministic masking.
+`/v1/pii/preview` and `/v1/redaction/preview` run NeMo PII detection after deterministic masking.
 
 NeMo GLiNER-PII uses NVIDIA hosted NIM or a local compatible endpoint:
 
@@ -93,33 +93,17 @@ NeMo GLiNER-PII uses NVIDIA hosted NIM or a local compatible endpoint:
 curl -X POST http://localhost:8000/v1/pii/preview \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "nemo",
-    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
-    "entities": ["first_name", "email", "phone_number"]
+    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199."
   }'
 ```
 
-OpenAI Guardrails PII runs locally through Presidio/spaCy:
-
-```bash
-curl -X POST http://localhost:8000/v1/pii/preview \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "openai-guardrails",
-    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
-    "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
-  }'
-```
-
-In chat, select the provider under `guardrails`:
+In chat, enable PII under `guardrails`:
 
 ```json
 {
   "guardrails": {
     "config_id": "default",
-    "enable_pii": true,
-    "pii_provider": "openai-guardrails",
-    "pii_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    "enable_pii": true
   }
 }
 ```

@@ -128,7 +128,7 @@ Guardrails configs are in `configs/`.
 - `config.yml` defines the OpenAI model and enables input/output rails.
 - `prompts.yml` defines the policy used by the self-check rails.
 - `masking.yml` defines deterministic literal and regex masking rules.
-- `pii_taxonomy.yml` maps bilingual PII types to Chinese/English keywords, deterministic rules, NeMo labels, and OpenAI Guardrails entities.
+- `pii_taxonomy.yml` maps bilingual PII types to Chinese/English keywords and deterministic rules.
 
 Additional examples are in `docs/guardrail-examples.md`.
 
@@ -176,12 +176,7 @@ MASK_REPLACEMENT=[REDACTED]
 
 ## Optional Chat PII Redaction
 
-Enable PII masking for a chat call by adding `guardrails.enable_pii: true`. This runs after deterministic masking and before the request reaches NeMo/OpenAI.
-
-Supported providers:
-
-- `nemo`: NeMo GLiNER-PII through NVIDIA hosted NIM or a local compatible endpoint.
-- `openai-guardrails`: OpenAI Guardrails `Contains PII`, running locally through Microsoft Presidio and spaCy. This does not call the OpenAI API.
+Enable PII masking for a chat call by adding `guardrails.enable_pii: true`. This runs NeMo GLiNER-PII after deterministic masking and before the request reaches NeMo/OpenAI.
 
 NeMo chat example:
 
@@ -190,29 +185,12 @@ NeMo chat example:
   "guardrails": {
     "config_id": "resume-screening",
     "enable_pii": true,
-    "pii_provider": "nemo",
-    "pii_score_threshold": 0.5,
-    "pii_entities": ["first_name", "last_name", "email", "phone_number"]
+    "pii_score_threshold": 0.5
   }
 }
 ```
 
-OpenAI Guardrails chat example:
-
-```json
-{
-  "guardrails": {
-    "config_id": "resume-screening",
-    "enable_pii": true,
-    "pii_provider": "openai-guardrails",
-    "pii_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
-  }
-}
-```
-
-Use `PII_PROVIDER=openai-guardrails` in `.env` to make OpenAI Guardrails the default PII provider when a request does not specify one.
-
-PII language defaults are provider-specific. NeMo defaults to `auto`, which means the backend sends the raw UTF-8 text to GLiNER with no English-only restriction so mixed Chinese/English input can be evaluated together. OpenAI Guardrails defaults to and only supports `en` in this service.
+PII language defaults to `auto`, which means the backend sends the raw UTF-8 text to GLiNER with no English-only restriction so mixed Chinese/English input can be evaluated together. The service does not send custom entity labels; it uses the NeMo/NVIDIA server defaults.
 
 The bilingual PII taxonomy is available for frontend presets and admin review:
 
@@ -220,11 +198,11 @@ The bilingual PII taxonomy is available for frontend presets and admin review:
 curl http://localhost:8000/v1/pii/taxonomy
 ```
 
-Use the taxonomy as a mapping layer only. `masking.yml` remains the executable deterministic rule set, NeMo accepts entity labels, and OpenAI Guardrails only accepts its fixed Presidio entity names.
+Use the taxonomy as a mapping layer only. `masking.yml` remains the executable deterministic rule set. NeMo GLiNER-PII label defaults are owned by the configured server/model.
 
 ## Experimental PII Preview
 
-The service exposes an experimental PII detector endpoint with selectable providers.
+The service exposes an experimental NeMo PII detector endpoint.
 
 For NeMo, the default hosted endpoint calls NVIDIA's GLiNER-PII NIM endpoint and requires `NVIDIA_API_KEY` or `NEMO_PII_API_KEY`. To use a local NIM or compatible GLiNER server, set `NEMO_PII_SERVER_ENDPOINT`.
 
@@ -238,27 +216,8 @@ export NVIDIA_API_KEY=nvapi-your-nvidia-api-key
 curl -X POST http://localhost:8000/v1/pii/preview \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "nemo",
     "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199."
   }'
-```
-
-For OpenAI Guardrails PII, no OpenAI API key is required. It runs locally through the `openai-guardrails` package using Presidio/spaCy:
-
-```bash
-curl -X POST http://localhost:8000/v1/pii/preview \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "openai-guardrails",
-    "text": "My name is Peter, my email is peter@example.com, phone is 416-555-0199.",
-    "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
-  }'
-```
-
-The first OpenAI Guardrails PII run needs the `en_core_web_sm` spaCy model. Docker installs it during image build. For local development, run this once if the provider asks for it:
-
-```bash
-uv run python -m spacy download en_core_web_sm
 ```
 
 Example response:
@@ -300,13 +259,11 @@ curl -X POST http://localhost:8000/v1/redaction/preview \
   -d '{
     "text": "王小明 can be reached at peter@example.com.",
     "enable_pii": true,
-    "provider": "openai-guardrails",
-    "entities": ["PERSON", "EMAIL_ADDRESS"],
     "score_threshold": 0.5
   }'
 ```
 
-Set `"enable_pii": false` to test only the deterministic regex/literal layer. This is useful when provider credentials or local PII dependencies are not available.
+Set `"enable_pii": false` to test only the deterministic regex/literal layer. This is useful when NeMo credentials or a local GLiNER endpoint are not available.
 
 ## Tests
 
@@ -322,12 +279,6 @@ Run the live NeMo GLiNER-PII preview test:
 uv run --env-file .env python scripts/test_guardrails.py --nemo-pii
 ```
 
-Run the local OpenAI Guardrails PII preview test:
-
-```bash
-uv run python scripts/test_guardrails.py --openai-pii
-```
-
 If the service is running, include an HTTP masking preview smoke test:
 
 ```bash
@@ -338,12 +289,6 @@ Include the HTTP NeMo PII smoke test:
 
 ```bash
 uv run --env-file .env python scripts/test_guardrails.py --server-url http://localhost:8000 --nemo-pii
-```
-
-Include the HTTP OpenAI Guardrails PII smoke test:
-
-```bash
-uv run python scripts/test_guardrails.py --server-url http://localhost:8000 --openai-pii
 ```
 
 Live chat tests call `/v1/chat/completions` and consume OpenAI tokens:

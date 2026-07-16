@@ -22,14 +22,14 @@ Replacement backend surface:
 
 - `/v1/masking/rules` for deterministic rule visibility
 - `/v1/masking/preview` for fast deterministic redaction preview
-- `/v1/pii/preview` for direct PII provider testing
+- `/v1/pii/preview` for direct NeMo PII testing
 - `/v1/redaction/preview` for deterministic plus optional PII preview
 - `/v1/chat/completions` with `guardrails.config_id` and optional `guardrails.enable_pii`
 
 The production redaction model is:
 
 - built-in deterministic rules from `masking.yml`
-- optional PII provider redaction with `guardrails.enable_pii`
+- optional NeMo PII redaction with `guardrails.enable_pii`
 - no user-managed keyword policy API
 
 ## Frontend Scope
@@ -64,10 +64,7 @@ Keep or add these frontend features:
 - deterministic preview text area using `/v1/masking/preview`
 - combined preview text area using `/v1/redaction/preview`
 - optional PII toggle mapped to `enable_pii` for preview and `guardrails.enable_pii` for chat
-- PII provider selector mapped to `provider` for preview and `guardrails.pii_provider` for chat
-- optional encoded PII toggle mapped to `detect_encoded_pii` for preview and `guardrails.pii_detect_encoded` for chat
-- optional PII entity multi-select mapped to `entities` for preview and `guardrails.pii_entities` for chat
-- clear error state for missing or invalid PII provider credentials
+- clear error state for missing or invalid NeMo credentials
 
 ## Behavioral Notes
 
@@ -76,58 +73,35 @@ Exact keyword lists are no longer treated as a production user workflow. They on
 The frontend should explain redaction as:
 
 1. Deterministic masking catches known classes and configured deployment-wide patterns.
-2. Optional PII detection catches supported PII entities using the selected provider.
+2. Optional NeMo PII detection catches supported PII entities.
 3. Guardrails configs control conversational policy, topic boundaries, and self-check behavior.
 
-Do not describe PII entities as exact business keywords. They are detector labels such as `email`, `phone_number`, or `first_name`.
+Do not expose editable PII entity labels. The backend uses the configured NeMo server/model defaults.
 
-Combined redaction always runs deterministic masking first, then the selected PII provider. For example, if `masking.yml` already turns an email address into `[EMAIL]`, the PII provider receives `[EMAIL]` instead of the raw email value.
+Combined redaction always runs deterministic masking first, then NeMo PII detection. For example, if `masking.yml` already turns an email address into `[EMAIL]`, NeMo receives `[EMAIL]` instead of the raw email value.
 
 `/v1/redaction/preview` defaults `enable_pii` to `true`. Chat only runs PII detection when the request explicitly includes `guardrails.enable_pii: true`.
 
-## PII Providers
+## NeMo PII
 
-Supported provider values:
+The only supported PII provider is NeMo GLiNER-PII through NVIDIA hosted NIM or a local compatible endpoint. Hosted usage requires `NVIDIA_API_KEY` or `NEMO_PII_API_KEY`.
 
 ```ts
-type PiiProvider = "nemo" | "openai-guardrails";
 type PiiLanguage = "en" | "zh" | "zh-Hant" | "zh-Hans" | "auto";
 ```
 
-Provider behavior:
+Use the label `NeMo GLiNER-PII` in the UI. The frontend should not expose a provider selector or entity selector, and should not send `provider`, `entities`, `guardrails.pii_provider`, or `guardrails.pii_entities`.
 
-- `nemo`: NeMo GLiNER-PII through NVIDIA hosted NIM or a local compatible endpoint. Hosted usage requires `NVIDIA_API_KEY` or `NEMO_PII_API_KEY`.
-- `openai-guardrails`: OpenAI Guardrails `Contains PII`, running locally through Microsoft Presidio and spaCy. It does not call the OpenAI API and does not need `OPENAI_API_KEY`.
+The backend also ships a bilingual PII taxonomy in `pii_taxonomy.yml`. Use it to show Chinese/English keywords without hard-coding them in the frontend. It is descriptive metadata; `masking.yml` is still the executable deterministic rule set.
 
-Default provider is `nemo` unless the backend is started with `PII_PROVIDER=openai-guardrails`.
-
-Suggested provider labels:
-
-- NeMo GLiNER-PII
-- OpenAI Guardrails PII
-
-Entity names are provider-specific. NeMo accepts labels such as `first_name`, `email`, and `phone_number`. OpenAI Guardrails accepts labels such as `PERSON`, `EMAIL_ADDRESS`, and `PHONE_NUMBER`; the backend also maps common aliases like `email`, `phone_number`, `first_name`, and `last_name`.
-
-The backend also ships a bilingual PII taxonomy in `pii_taxonomy.yml`. Use it to show Chinese/English keywords and provider mappings without hard-coding them in the frontend. It is descriptive metadata; `masking.yml` is still the executable deterministic rule set.
-
-Suggested entity presets:
-
-```ts
-const nemoEntityPreset = ["first_name", "last_name", "email", "phone_number"];
-const openaiEntityPreset = ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"];
-```
-
-## Provider Field Mapping
+## PII Field Mapping
 
 Preview endpoints use top-level PII fields:
 
 ```ts
 type PreviewPiiFields = {
-  provider?: PiiProvider;
   language?: PiiLanguage;
   score_threshold?: number;
-  entities?: string[];
-  detect_encoded_pii?: boolean;
 };
 ```
 
@@ -137,17 +111,14 @@ Chat uses the same options under `guardrails` with a `pii_` prefix:
 type ChatGuardrailsFields = {
   config_id?: string;
   enable_pii?: boolean;
-  pii_provider?: PiiProvider;
   pii_language?: PiiLanguage;
   pii_score_threshold?: number;
-  pii_entities?: string[];
-  pii_detect_encoded?: boolean;
 };
 ```
 
 Backend-only PII fields are removed before the chat request is forwarded to NeMo/OpenAI.
 
-Language behavior is provider-specific. NeMo defaults to `auto`, which sends raw UTF-8 text to GLiNER without forcing English-only validation, so mixed Chinese/English input can be evaluated together. NeMo also accepts `en`, `zh`, `zh-Hant`, and `zh-Hans` as response metadata. OpenAI Guardrails is Presidio/spaCy in this backend and defaults to, and only accepts, `en`.
+NeMo language defaults to `auto`, which sends raw UTF-8 text to GLiNER without forcing English-only validation, so mixed Chinese/English input can be evaluated together. NeMo also accepts `en`, `zh`, `zh-Hant`, and `zh-Hans` as response metadata.
 
 ## Endpoints
 
@@ -182,8 +153,6 @@ type PiiTaxonomyEntity = {
   en_keywords: string[];
   zh_keywords: string[];
   deterministic_rule_names: string[];
-  nemo_labels: string[];
-  openai_guardrails_entities: string[];
 };
 
 type PiiTaxonomyResponse = {
@@ -194,7 +163,7 @@ type PiiTaxonomyResponse = {
 };
 ```
 
-Use this endpoint for UI presets such as "Chinese/Taiwan resume PII", provider-specific entity suggestions, and explanatory copy. Do not treat taxonomy keywords as a user-editable production policy engine.
+Use this endpoint for UI presets such as "Chinese/Taiwan resume PII" and explanatory copy. Do not treat taxonomy keywords as a user-editable production policy engine.
 
 ### Preview Deterministic Masking
 
@@ -230,11 +199,8 @@ Content-Type: application/json
 ```ts
 type PiiPreviewRequest = {
   text: string;
-  provider?: "nemo" | "openai-guardrails";
   language?: PiiLanguage;
   score_threshold?: number;
-  entities?: string[];
-  detect_encoded_pii?: boolean;
 };
 ```
 
@@ -242,31 +208,8 @@ NeMo request:
 
 ```json
 {
-  "provider": "nemo",
   "language": "zh-Hant",
-  "text": "姓名：王小明，Email：peter@example.com",
-  "entities": ["person", "chinese_name", "email"]
-}
-```
-
-OpenAI Guardrails request:
-
-```json
-{
-  "provider": "openai-guardrails",
-  "text": "My name is Peter, my email is peter@example.com.",
-  "entities": ["PERSON", "EMAIL_ADDRESS"]
-}
-```
-
-OpenAI Guardrails can optionally check encoded PII:
-
-```json
-{
-  "provider": "openai-guardrails",
-  "text": "Encoded email: cGV0ZXJAZXhhbXBsZS5jb20=",
-  "entities": ["EMAIL_ADDRESS"],
-  "detect_encoded_pii": true
+  "text": "姓名：王小明，Email：peter@example.com"
 }
 ```
 
@@ -284,30 +227,19 @@ type PiiEntity = {
 
 type PiiPreviewResponse = {
   enabled: true;
-  provider: PiiProvider;
+  provider: "nemo";
   engine: string;
   model: string;
   language: PiiLanguage;
   score_threshold: number;
-  detect_encoded_pii: boolean;
   masked: string;
   entities: PiiEntity[];
-  supported_entities: string[];
-} & (
-  | {
-      provider: "nemo";
-      server_endpoint: string;
-      tagged_text: string;
-    }
-  | {
-      provider: "openai-guardrails";
-      detected_entities: Record<string, string[]>;
-      pii_detected: boolean;
-    }
-);
+  server_endpoint: string;
+  tagged_text: string;
+};
 ```
 
-If `provider` is omitted, the backend uses `PII_PROVIDER`, defaulting to `nemo`. `score_threshold` must be greater than `0` and less than or equal to `1`.
+The frontend should omit `provider` and `entities`. If `provider` is supplied, the backend only accepts `nemo`. `score_threshold` must be greater than `0` and less than or equal to `1`.
 
 ### Preview Combined Redaction
 
@@ -320,11 +252,8 @@ Content-Type: application/json
 type RedactionPreviewRequest = {
   text: string;
   enable_pii?: boolean;
-  provider?: "nemo" | "openai-guardrails";
   language?: PiiLanguage;
   score_threshold?: number;
-  entities?: string[];
-  detect_encoded_pii?: boolean;
 };
 ```
 
@@ -343,9 +272,7 @@ Example deterministic plus PII request:
 {
   "text": "My name is Peter and my email is peter@example.com.",
   "enable_pii": true,
-  "provider": "openai-guardrails",
-  "score_threshold": 0.5,
-  "entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+  "score_threshold": 0.5
 }
 ```
 
@@ -358,7 +285,6 @@ type RedactionPreviewResponse = {
   score_threshold: number;
   enable_pii: boolean;
   pii_provider: string | null;
-  pii_detect_encoded: boolean;
   stages: string[];
   deterministic: {
     enabled: boolean;
@@ -400,10 +326,7 @@ Use the normal NeMo/OpenAI-compatible request shape. Frontend can choose a guard
   "guardrails": {
     "config_id": "default",
     "enable_pii": true,
-    "pii_provider": "openai-guardrails",
-    "pii_score_threshold": 0.5,
-    "pii_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
-    "pii_detect_encoded": false
+    "pii_score_threshold": 0.5
   }
 }
 ```
@@ -422,30 +345,25 @@ Frontend should send no `policy_id` key at all, not `null`, not an empty string,
 
 - Use `/v1/masking/preview` for fast local deterministic checks.
 - Use `/v1/redaction/preview` to compare deterministic-only versus deterministic plus PII.
-- Switch the entity preset when the selected provider changes.
-- Show NeMo credentials status separately from OpenAI Guardrails local dependency status.
+- Show NeMo credentials status when PII preview fails or succeeds.
 - NeMo PII preview can fail with `503` when NVIDIA credentials are missing or `502` when the provider returns an error.
-- OpenAI Guardrails PII preview can fail with `502` when local Presidio/spaCy initialization fails.
 - Do not store sensitive preview inputs in browser local storage.
 
 Common `400` validation details:
 
 - `text must be a string.`
 - `provider must be a string.`
-- `provider must be one of: nemo, openai-guardrails`
+- `provider must be 'nemo'.`
 - `language must be a string.`
 - `score_threshold must be a number.`
 - `score_threshold must be greater than 0 and less than or equal to 1.`
-- `entities must be a list of strings.`
-- `detect_encoded_pii must be a boolean.`
+- `entities is no longer supported. NeMo GLiNER-PII uses server default labels.`
 - `enable_pii must be a boolean.`
 - `guardrails.enable_pii must be a boolean.`
 - `guardrails.pii_provider must be a string.`
 - `guardrails.pii_language must be a string.`
 - `guardrails.pii_score_threshold must be a number.`
-- `guardrails.pii_entities must be a list of strings.`
-- `guardrails.pii_detect_encoded must be a boolean.`
-- `Unsupported OpenAI Guardrails PII entities: ... Supported entities: ...`
+- `guardrails.pii_entities is no longer supported. NeMo GLiNER-PII uses server default labels.`
 
 ## Suggested UI Copy
 
@@ -455,7 +373,7 @@ Use labels like:
 - PII detection
 - Guardrails config
 - Combined redaction preview
-- PII provider
+- NeMo GLiNER-PII
 
 Avoid labels like:
 
